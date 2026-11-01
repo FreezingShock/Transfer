@@ -28,6 +28,9 @@
     "active": true,
     "targets": "all",
     "category": "Productivity",
+    "windows": {
+      "nsis": { "installMode": "currentUser" }
+    },
     "shortDescription": "Sorts your Desktop, Downloads and Documents automatically, on your computer only.",
     "icon": [
       "icons/32x32.png",
