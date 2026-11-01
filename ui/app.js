@@ -1,285 +1,276 @@
-/* ---------- line table (mirrors core/src/lines.rs) ---------- */
-const LINES=[
- {id:'shortcuts',folder:'Shortcuts',letter:'S',color:'#0039A6'},
- {id:'installers',folder:'Installers',letter:'I',color:'#EE352E'},
- {id:'videos',folder:'Videos',letter:'V',color:'#FF6319'},
- {id:'images',folder:'Images',letter:'P',color:'#FCCC0A',ink:'#000'},
- {id:'audio',folder:'Audio',letter:'A',color:'#B933AD'},
- {id:'docs',folder:'Docs',letter:'D',color:'#00933C'},
- {id:'archives',folder:'Archives',letter:'Z',color:'#996633'},
- {id:'code',folder:'Code',letter:'C',color:'#6CBE45'},
+/* Transfer UI: liquid glass, small window. Talks to the Rust engine through
+   Tauri commands; in a plain browser it runs on demo data. */
+
+/* ---------- lines (mirrors core/src/lines.rs) ---------- */
+const P = {
+  shortcuts: 'M7 17L17 7M9 7h8v8',
+  installers: 'M12 3v12M8 11l4 4 4-4M5 20h14',
+  videos: 'M4 6h11a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V8a2 2 0 012-2zM17 10l5-3v10l-5-3',
+  images: 'M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M15.5 9h.01',
+  audio: 'M9 18V6l11-2v12M9 18a3 3 0 11-6 0 3 3 0 016 0zM20 16a3 3 0 11-6 0 3 3 0 016 0z',
+  docs: 'M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8zM14 3v5h5M9 13h6M9 17h4',
+  archives: 'M3 4h18v4H3zM5 8v11a1 1 0 001 1h12a1 1 0 001-1V8M10 12h4',
+  code: 'M8 8l-4 4 4 4M16 8l4 4-4 4M14 5l-4 14',
+  holding: 'M9.5 9a2.5 2.5 0 115 .5c0 1.5-2.5 2-2.5 3.5M12 17h.01',
+  home: 'M3 11l9-7 9 7M5 10v10h14V10',
+  review: 'M4 13l2-8h12l2 8M4 13v6h16v-6M4 13h5l1 2h4l1-2h5',
+  history: 'M12 7v5l3 2M21 12a9 9 0 11-9-9 9 9 0 019 9z',
+  settings: 'M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4',
+  search: 'M11 18a7 7 0 100-14 7 7 0 000 14zM20 20l-4-4',
+  lock: 'M5 11h14v10H5zM8 11V7a4 4 0 018 0v4',
+  chevR: 'M9 6l6 6-6 6', chevD: 'M6 9l6 6 6-6',
+  trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
+};
+const LINES = [
+  { id: 'shortcuts', name: 'Shortcuts', tint: 'rgba(10,132,255,.85)', color: '#64a8ff' },
+  { id: 'installers', name: 'Installers', tint: 'rgba(255,69,58,.85)', color: '#ff6b61' },
+  { id: 'videos', name: 'Videos', tint: 'rgba(255,159,10,.85)', color: '#ffb340' },
+  { id: 'images', name: 'Images', tint: 'rgba(255,204,0,.85)', color: '#ffd84d' },
+  { id: 'audio', name: 'Audio', tint: 'rgba(191,90,242,.85)', color: '#d08cff' },
+  { id: 'docs', name: 'Docs', tint: 'rgba(48,209,88,.8)', color: '#5be37d' },
+  { id: 'archives', name: 'Archives', tint: 'rgba(172,142,104,.85)', color: '#d6b98f' },
+  { id: 'code', name: 'Code', tint: 'rgba(100,210,255,.75)', color: '#7ee0ff' },
 ];
-const HOLD={id:'holding',folder:'Review',letter:'?',color:'#A7A9AC',ink:'#000'};
-const L=id=>LINES.find(l=>l.id===id)||HOLD;
-const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const bullet=(id,cls='')=>{const l=L(id);return `<span class="bullet ${cls}" style="--c:${l.color};--ink:${l.ink||'#fff'}" aria-label="${l.folder}">${l.letter}</span>`};
-const base=p=>p.split(/[\\/]/).pop();
-const dirOf=p=>{const a=p.split(/[\\/]/);a.pop();return a.join('/')};
-const srcName=p=>{const a=p.split(/[\\/]/);let i=a.length-2;if(i>0&&LINES.some(l=>l.folder===a[i]))i--;return a[i]||p};
-const fmtSize=n=>n<1e3?n+' B':n<1e6?(n/1e3).toFixed(0)+' KB':n<1e9?(n/1e6).toFixed(1)+' MB':(n/1e9).toFixed(2)+' GB';
-const ago=ts=>{const s=Math.max(0,Date.now()/1e3-ts);return s<60?'just now':s<3600?Math.floor(s/60)+' min ago':s<86400?Math.floor(s/3600)+' hr ago':Math.floor(s/86400)+' d ago'};
-const pct=c=>Math.round(c*100)+'%';
+const HOLD = { id: 'holding', name: 'Review', tint: 'rgba(255,255,255,.16)', color: '#fff' };
+const L = id => LINES.find(l => l.id === id) || HOLD;
 
-/* ---------- bridge: Tauri when inside the app, demo engine otherwise ---------- */
-const T=window.__TAURI__;
-const api=T?{
-  state:()=>T.core.invoke('get_state').then(JSON.parse),
-  plan:()=>T.core.invoke('plan').then(JSON.parse),
-  applyAll:()=>T.core.invoke('apply_all').then(JSON.parse),
-  undo:id=>T.core.invoke('undo',{id}).then(JSON.parse),
-  correct:(id,line)=>T.core.invoke('correct',{id,line}).then(JSON.parse),
-  route:(path,line)=>T.core.invoke('route',{path,line}).then(JSON.parse),
-  trash:paths=>T.core.invoke('trash',{paths}),
-  saveSettings:s=>T.core.invoke('save_settings',{settings:s}),
-  onMoved:cb=>T.event.listen('transfer://moved',e=>cb(JSON.parse(e.payload))),
-}:demoApi();
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const svg = (d, stroke = '#fff', w = 2) => `<svg viewBox="0 0 24 24" fill="none" stroke="${stroke}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+const icon = (id, cls = '') => `<span class="ic ${cls}" style="--t:${L(id).tint}">${svg(P[id] || P.holding)}</span>`;
+const parts = p => p.split(/[\\/]/);
+const base = p => parts(p).pop();
+const srcOf = p => { const a = parts(p); let i = a.length - 2; if (i > 0 && LINES.some(l => l.name === a[i])) i--; return a[i] || p; };
+const size = n => n < 1e3 ? n + ' B' : n < 1e6 ? Math.round(n / 1e3) + ' KB' : n < 1e9 ? (n / 1e6).toFixed(n < 1e7 ? 1 : 0) + ' MB' : (n / 1e9).toFixed(1) + ' GB';
+const ago = ts => { const s = Math.max(0, Date.now() / 1e3 - ts); return s < 60 ? 'now' : s < 3600 ? Math.floor(s / 60) + 'm' : s < 86400 ? Math.floor(s / 3600) + 'h' : Math.floor(s / 86400) + 'd'; };
 
-function demoApi(){
-  const now=Date.now()/1e3, H='/Users/nathan/';
-  let id=0;const hist=[];
-  const mv=(src,name,line,conf,why,minsAgo,via='auto')=>hist.unshift({id:++id,ts:now-minsAgo*60,name,from:H+src+'/'+name,to:H+src+'/'+L(line).folder+'/'+name,line,confidence:conf,reasons:why,undone:false,via});
-  mv('Downloads','APBio_Lab7_rubric.pdf','docs',.90,['content: PDF','downloaded from canvas.instructure.com'],410);
-  mv('Desktop','Minecraft Launcher.lnk','shortcuts',.99,['content: link/alias record'],400,'sweep');
-  mv('Desktop','Steam.lnk','shortcuts',.99,['content: link/alias record'],400,'sweep');
-  mv('Desktop','Roblox Studio.lnk','shortcuts',.99,['content: link/alias record'],400,'sweep');
-  mv('Downloads','BlenderSetup-4.2.1-x64.msi','installers',.97,['content: Windows installer database','downloaded from blender.org'],260);
-  mv('Downloads','Obsidian-1.7.4.dmg','installers',.97,['content: macOS disk image','downloaded from github.com'],190);
-  mv('Downloads','hyperpop_ref.mp3','audio',.95,['content: audio stream'],150);
-  mv('Downloads','kick_808.wav','audio',.95,['content: audio stream','matches your past sorting → Audio'],149);
-  mv('Downloads','nexus-main.zip','code',.72,['content: compressed archive','looks like a source download','downloaded from codeload.github.com'],95);
-  mv('Desktop','Screenshot 2026-11-01 at 12.40.12 PM.png','images',.95,['content: image data'],70);
-  mv('Downloads','Cal Poly Pomona checklist.docx','docs',.95,['content: office document'],52);
-  mv('Downloads','ZoomInstallerFull.exe','installers',.94,['content: program binary','name looks like a setup/version build','downloaded from zoom.us'],31);
-  mv('Downloads','lecture_week6','videos',.96,['content: video stream'],18);
-  mv('Downloads','IMG_4417.MOV','videos',.96,['content: video stream','downloaded from icloud.com'],9);
-  mv('Downloads','xc_meet_finish.mp4','videos',.96,['content: video stream','downloaded from drive.google.com'],4);
-  let held=[
-    {name:'dataset.bin',path:H+'Downloads/dataset.bin',guess:'holding',confidence:0,reasons:['no readable signature','no extension hint'],size:5_000_000},
-    {name:'ffmpeg-7.1-macos-arm64.tar.gz',path:H+'Downloads/ffmpeg-7.1-macos-arm64.tar.gz',guess:'installers',confidence:.55,reasons:['content: compressed archive','name looks like a release build','only 55% sure, holding for review'],size:78_400_000},
-    {name:'Infill_parcels_export',path:H+'Documents/Infill_parcels_export',guess:'docs',confidence:.48,reasons:['unreadable content','downloaded from data.lacity.org','only 48% sure, holding for review'],size:2_300_000},
-  ];
-  let stale=[
-    {name:'DiscordSetup.exe',path:H+'Downloads/Installers/DiscordSetup.exe',age_days:60,size:96_200_000},
-    {name:'vlc-3.0.20-win64.exe',path:H+'Downloads/Installers/vlc-3.0.20-win64.exe',age_days:45,size:42_100_000},
-    {name:'Unity Hub Setup.exe',path:H+'Downloads/Installers/Unity Hub Setup.exe',age_days:88,size:118_000_000},
-    {name:'RobloxStudioInstaller.exe',path:H+'Downloads/Installers/RobloxStudioInstaller.exe',age_days:34,size:4_600_000},
-  ];
-  const settings={sources:[{path:H+'Desktop',enabled:true},{path:H+'Downloads',enabled:true},{path:H+'Documents',enabled:true}],confidence:.6,stale_installer_days:30,settle_secs:8,paused:false,launch_at_login:true};
-  let learned=14;
-  const stats=()=>{const per={};LINES.forEach(l=>per[l.id]=0);let today=0;const d0=new Date();d0.setHours(0,0,0,0);
-    hist.filter(e=>!e.undone).forEach(e=>{per[e.line]++;if(e.ts*1e3>=d0)today++});return{per_line:per,today,total:hist.filter(e=>!e.undone).length+212,learned_examples:learned}};
-  const pending=[
-    {source:H+'Desktop',moves:[
-      {name:'SMC Portal.url',from:H+'Desktop/SMC Portal.url',to:H+'Desktop/Shortcuts/SMC Portal.url',line:'shortcuts',confidence:.99,reasons:['content: link/alias record'],size:62},
-      {name:'infill_grid.py',from:H+'Desktop/infill_grid.py',to:H+'Desktop/Code/infill_grid.py',line:'code',confidence:.91,reasons:['content: source code (86% code-like)'],size:1240},
-      {name:'untitled',from:H+'Desktop/untitled',to:H+'Desktop/Images/untitled',line:'images',confidence:.95,reasons:['content: image data'],size:6010},
-      {name:'ideas.txt',from:H+'Desktop/ideas.txt',to:H+'Desktop/Docs/ideas.txt',line:'docs',confidence:.82,reasons:['content: plain text / notes'],size:144}]},
-    {source:H+'Downloads',moves:[
-      {name:'edit_v3_final.mkv',from:H+'Downloads/edit_v3_final.mkv',to:H+'Downloads/Videos/edit_v3_final.mkv',line:'videos',confidence:.96,reasons:['content: video stream'],size:412_000_000},
-      {name:'receipt.pdf',from:H+'Downloads/receipt.pdf',to:H+'Downloads/Images/receipt.pdf',line:'images',confidence:.95,reasons:['content: image data (named .pdf, actually a photo)'],size:4100},
-      {name:'GoogleChrome.pkg',from:H+'Downloads/GoogleChrome.pkg',to:H+'Downloads/Installers/GoogleChrome.pkg',line:'installers',confidence:.97,reasons:['content: macOS installer package'],size:240_000_000},
-      {name:'photos_from_coach.zip',from:H+'Downloads/photos_from_coach.zip',to:H+'Downloads/Archives/photos_from_coach.zip',line:'archives',confidence:.70,reasons:['content: compressed archive'],size:58_000_000}]},
-    {source:H+'Documents',moves:[
-      {name:'track_pr_tracker.csv',from:H+'Documents/track_pr_tracker.csv',to:H+'Documents/Docs/track_pr_tracker.csv',line:'docs',confidence:.82,reasons:['content: plain text / notes'],size:89},
-      {name:'Topanga Tycoon.lnk',from:H+'Documents/Topanga Tycoon.lnk',to:H+'Documents/Shortcuts/Topanga Tycoon.lnk',line:'shortcuts',confidence:.99,reasons:['content: link/alias record'],size:320}]},
-  ];
-  let swept=false;
-  const R=x=>Promise.resolve(JSON.parse(JSON.stringify(x)));
-  let movedCb=null;
-  // a new download "arrives" shortly after load, like the watcher would report
-  setTimeout(()=>{mv('Downloads','Spotify Installer.exe','installers',.94,['content: program binary','name looks like a setup/version build','downloaded from spotify.com'],0);movedCb&&movedCb(hist[0])},6500);
-  return{
-    demo:true,
-    state:()=>R({stats:stats(),history:hist,settings,held,stale,lines:LINES}),
-    plan:()=>R(swept?pending.map(p=>({...p,moves:[]})):pending).then(p=>p.map((x,i)=>({...x,held:i===1?held:[],stale:i===1?stale:[],skipped:i===1?3:1}))),
-    applyAll:()=>{const out=[];if(!swept){pending.forEach(p=>p.moves.forEach(m=>{mv(srcName(m.from),m.name,m.line,m.confidence,m.reasons,0,'sweep');out.push(hist[0])}));swept=true}return R(out)},
-    undo:i=>{const e=hist.find(x=>x.id===i);e.undone=true;return R(e)},
-    correct:(i,line)=>{const e=hist.find(x=>x.id===i);e.undone=true;mv(srcName(e.from),e.name,line,1,['you re-routed this'],0,'correction');learned++;return R(hist[0])},
-    route:(path,line)=>{const h=held.find(x=>x.path===path);held=held.filter(x=>x!==h);mv(srcName(path),h.name,line,1,['you routed this'],0,'correction');learned++;return R(hist[0])},
-    trash:paths=>{stale=stale.filter(s=>!paths.includes(s.path));return R(paths.length)},
-    saveSettings:s=>{Object.assign(settings,s);return R(true)},
-    onMoved:cb=>{movedCb=cb},
+/* ---------- bridge ---------- */
+const T = window.__TAURI__;
+if (T) document.documentElement.classList.add('native'), document.body.classList.add('native');
+const api = T ? {
+  state: () => T.core.invoke('get_state').then(JSON.parse),
+  plan: () => T.core.invoke('plan').then(JSON.parse),
+  applyAll: () => T.core.invoke('apply_all').then(JSON.parse),
+  undo: id => T.core.invoke('undo', { id }).then(JSON.parse),
+  correct: (id, line) => T.core.invoke('correct', { id, line }).then(JSON.parse),
+  route: (path, line) => T.core.invoke('route', { path, line }).then(JSON.parse),
+  trash: paths => T.core.invoke('trash', { paths }),
+  saveSettings: s => T.core.invoke('save_settings', { settings: s }),
+  on: (ev, cb) => T.event.listen(ev, e => cb(e.payload)),
+} : demoApi();
+
+/* ---------- state ---------- */
+let S = null, fresh = new Set(), query = '', openHeld = 0, openMove = null, trashAsk = false;
+const TABS = [['home', 'Home'], ['review', 'Review'], ['history', 'History'], ['settings', 'Settings']];
+const cur = () => { const h = location.hash.slice(1); return TABS.some(t => t[0] === h) ? h : 'home'; };
+const $ = id => document.getElementById(id);
+
+async function load() { S = await api.state(); render(); }
+function render() {
+  const p = S.settings.paused;
+  $('topRight').innerHTML = cur() === 'home'
+    ? `<button class="chip live ${p ? 'off' : ''}" id="bLive" aria-label="${p ? 'Resume sorting' : 'Pause sorting'}"><i></i>${p ? 'Paused' : 'Live'}</button>`
+    : cur() === 'review' && S.held.length ? `<button class="chip live" id="bLeaveAll">Leave all</button>` : '';
+  ({ home, review, history, settings })[cur()]();
+  foot();
+  const lv = $('bLive'); if (lv) lv.onclick = togglePause;
+  const la = $('bLeaveAll'); if (la) la.onclick = () => { S.held = []; render(); };
+}
+addEventListener('hashchange', () => { openMove = null; trashAsk = false; render(); $('view').scrollTop = 0; });
+
+function foot() {
+  const n = S.held.length;
+  $('foot').innerHTML = `<nav class="tabs chip" aria-label="Sections">${TABS.map(([id, label]) =>
+    `<a href="#${id}" aria-label="${label}${id === 'review' && n ? `, ${n} waiting` : ''}" ${cur() === id ? 'aria-current="page"' : ''}>${svg(P[id], '#fff', 1.8)}${id === 'review' && n ? `<span class="badge">${n}</span>` : ''}</a>`).join('')}</nav>
+    ${cur() === 'home' ? '<button class="btn solid" id="bSweep" style="padding:0 16px;height:38px;border-radius:19px">Sweep</button>' : ''}`;
+  const sw = $('bSweep'); if (sw) sw.onclick = sweep;
+}
+
+/* ---------- Home ---------- */
+function home() {
+  const recent = S.history.filter(e => !e.undone).slice(0, 6);
+  const stale = S.stale, staleSize = stale.reduce((a, s) => a + s.size, 0);
+  $('view').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:2px">
+      <span class="sub">Today</span>
+      <div class="big"><b>${S.stats.today}</b><span>file${S.stats.today === 1 ? '' : 's'} sorted</span></div>
+    </div>
+    <div class="list">${recent.map(row).join('') || '<div class="empty">Nothing yet. New downloads and loose files will show up here.</div>'}</div>
+    ${stale.length ? `<div class="group"><div class="set">${icon('installers', 'sm')}<span>${stale.length} old installer${stale.length > 1 ? 's' : ''} · ${size(staleSize)}</span>
+      <button class="pill ${trashAsk ? 'solid' : 'ghost'}" id="bTrash">${trashAsk ? 'Move to Trash' : 'Clear'}</button></div></div>` : ''}`;
+  const t = $('bTrash');
+  if (t) t.onclick = async () => {
+    if (!trashAsk) { trashAsk = true; return home(); }
+    await api.trash(S.stale.map(s => s.path)); trashAsk = false;
+    toast(`Moved ${S.stale.length} installers to the Recycle Bin`); load();
   };
 }
-
-/* ---------- state + routing ---------- */
-let S=null, fresh=new Set(), histFilter='all';
-const SCREENS=[
-  {id:'service',label:'Service',small:'Live',c:'#6CBE45',b:'L'},
-  {id:'review',label:'Review',small:'Held',c:'#A7A9AC',b:'?'},
-  {id:'history',label:'History',small:'Moves',c:'#0039A6',b:'H'},
-  {id:'cleanup',label:'Cleanup',small:'Installers',c:'#EE352E',b:'I'},
-  {id:'prefs',label:'Settings',small:'Local only',c:'#8c8a84',b:'⚙'},
-];
-const cur=()=>{const h=location.hash.slice(1);return SCREENS.some(s=>s.id===h)?h:'service'};
-
-async function load(){S=await api.state();render()}
-function nav(){
-  const counts={review:S.held.length,cleanup:S.stale.length,history:S.stats.total,service:S.stats.today};
-  const val={service:`${counts.service} today`,review:counts.review?`${counts.review} waiting`:'Clear',history:`${counts.history}`,cleanup:counts.cleanup?`${counts.cleanup} stale`:'Clear',prefs:'Private'};
-  document.getElementById('nav').innerHTML=SCREENS.map(s=>`<a class="chip" href="#${s.id}" style="--c:${s.c}" ${cur()===s.id?'aria-current="page"':''}>
-    <span class="bullet" style="--c:${s.c};--ink:${s.c==='#A7A9AC'?'#000':'#fff'}">${s.b}</span><small>${s.label}</small><b>${val[s.id]}</b></a>`).join('');
-  const p=S.settings.paused, n=S.settings.sources.filter(x=>x.enabled).length;
-  document.getElementById('dot').classList.toggle('off',p);
-  document.getElementById('ebtxt').textContent=p?'Paused · nothing will move':`Live · watching ${n} folder${n===1?'':'s'}`;
-  document.getElementById('demoTag').hidden=!api.demo;
-  const titles={service:'Everything is <em>on the line</em>',review:'A few files need <em>a stop</em>',history:'Every move, <em>reversible</em>',cleanup:'Old installers, <em>end of line</em>',prefs:'Runs here, <em>stays here</em>'};
-  document.getElementById('hello').innerHTML=titles[cur()];
-}
-function render(){nav();({service,review,history,cleanup,prefs})[cur()]();}
-addEventListener('hashchange',()=>{render();scrollTo(0,0)});
-const tick=()=>{const d=new Date();let h=d.getHours()%12||12;document.getElementById('clock').innerHTML=`${h}:${String(d.getMinutes()).padStart(2,'0')}<small>${d.getHours()<12?'AM':'PM'}</small>`};tick();setInterval(tick,1000);
-
-const V=()=>document.getElementById('view');
-const panel=(c,title,sub,actions,body)=>`<section class="panel"><div class="ph" style="--c:${c}">${title[0]}<h2>${title[1]}</h2><span class="sub">${sub}</span><span class="sp"></span>${actions||''}</div><div class="pb">${body}</div></section>`;
-
-/* ---------- Service ---------- */
-function depRow(e,withActs=true){
-  return `<div class="dep ${e.undone?'undone':''} ${fresh.has(e.id)?'fresh':''}" data-id="${e.id}">${bullet(e.line)}
-   <div class="nm"><b title="${esc(e.from)}">${esc(e.name)}</b><span>→ ${esc(srcName(e.from))}/${esc(L(e.line).folder)} · ${esc(e.reasons[0]||'')}</span></div>
-   <div class="meta">${pct(e.confidence)}<i>${ago(e.ts)}</i></div>
-   ${withActs?`<div class="acts">${e.undone?'<span class="note">Undone</span>':`<button class="btn sm" data-undo="${e.id}">Undo</button><button class="btn sm" data-fix="${e.id}" aria-label="Re-route ${esc(e.name)}">Re-route</button>`}</div>`:''}</div>`;
-}
-function service(){
-  const st=S.stats, max=Math.max(1,...Object.values(st.per_line));
-  const srcs=S.settings.sources.map(s=>{
-    const name=base(s.path), counts={};LINES.forEach(l=>counts[l.id]=0);
-    S.history.filter(e=>!e.undone&&srcName(e.from)===name).forEach(e=>counts[e.line]++);
-    return `<div class="station"><h3><small>${s.enabled?'Station':'Skipped'}</small>${esc(name)}</h3><div class="track">${LINES.map(l=>`<div class="stop ${counts[l.id]?'':'zero'}">${bullet(l.id,'sm')}<em>${counts[l.id]||'·'}</em></div>`).join('')}</div></div>`}).join('');
-  V().innerHTML=`
-   <div class="stats">
-     <div class="stat"><small>Moved today</small><b>${st.today}</b></div>
-     <div class="stat"><small>All time</small><b>${st.total}</b></div>
-     <div class="stat"><small>Waiting for you</small><b>${S.held.length}</b></div>
-     <div class="stat"><small>Learned from you</small><b>${st.learned_examples}</b></div>
-   </div>
-   <div class="grid2">
-    ${panel('#6CBE45',[`<span class="bullet" style="--c:#6CBE45">L</span>`,'Arrivals'],'Newest first',`<button class="btn go" id="sweep">Sweep now</button>`,
-      `<div class="board" id="board">${S.history.slice(0,9).map(e=>depRow(e)).join('')||'<div class="empty">Nothing has moved yet. New downloads will show up here.</div>'}</div>
-       ${S.history.length>9?'<a class="btn" href="#history" style="align-self:flex-start">All moves →</a>':''}`)}
-    ${panel('#0039A6',[`<span class="bullet" style="--c:#0039A6">M</span>`,'Route map'],'',`<button class="btn sm" id="pause">${S.settings.paused?'Resume':'Pause'}</button>`,
-      `<div class="route">${srcs}</div>
-       <div class="legend">${LINES.map(l=>`<div class="lg">${bullet(l.id,'sm')}<span>${l.folder}</span><em>${st.per_line[l.id]||0}</em></div>`).join('')}</div>
-       <p class="note">Folders are made inside each source, so Downloads/Videos, Desktop/Shortcuts and so on. Files you already put in subfolders are never touched.</p>`)}
-   </div>`;
-  document.getElementById('sweep').onclick=sweep;
-  document.getElementById('pause').onclick=async()=>{S.settings.paused=!S.settings.paused;await api.saveSettings(S.settings);toast(S.settings.paused?'Paused. Nothing will move.':'Live again.');render()};
-}
-V().addEventListener('click',async ev=>{
-  const u=ev.target.closest('[data-undo]'),f=ev.target.closest('[data-fix]');
-  if(u){const e=await api.undo(+u.dataset.undo);toast(`Put ${e.name} back`);await load()}
-  if(f){reroute(+f.dataset.fix)}
-});
-
-/* sweep = dry run preview, then apply */
-async function sweep(){
-  const plans=await api.plan();const n=plans.reduce((a,p)=>a+p.moves.length,0);
-  sheet(`<div class="ph" style="--c:#6CBE45"><span class="bullet" style="--c:#6CBE45">L</span><h2>Sweep preview</h2><span class="sub">Dry run · nothing has moved yet</span><span class="sp"></span><button class="btn" data-close>Cancel</button><button class="btn go" id="doit" ${n?'':'disabled'}>Move ${n} file${n===1?'':'s'}</button></div>
-   <div class="pb">${plans.map(p=>`<div class="grp"><h4>${esc(base(p.source))} · ${p.moves.length} to move${p.held.length?` · ${p.held.length} held`:''}${p.stale.length?` · ${p.stale.length} stale installers`:''}</h4>
-     ${p.moves.map(m=>`<div class="dep">${bullet(m.line)}<div class="nm"><b>${esc(m.name)}</b><span>→ ${esc(base(p.source))}/${esc(L(m.line).folder)} · ${esc(m.reasons[0])}</span></div><div class="meta">${pct(m.confidence)}<i>${fmtSize(m.size)}</i></div></div>`).join('')||'<p class="note">Already tidy.</p>'}</div>`).join('')}</div>`);
-  document.getElementById('doit').onclick=async()=>{const moved=await api.applyAll();moved.forEach(e=>fresh.add(e.id));close_();toast(`Moved ${moved.length} files`);await load()};
-}
-
-/* re-route sheet */
-function reroute(id){
-  const e=S.history.find(x=>x.id===id);
-  sheet(`<div class="ph" style="--c:${L(e.line).color}">${bullet(e.line)}<h2>Re-route</h2><span class="sub">${esc(e.name)}</span><span class="sp"></span><button class="btn" data-close>Cancel</button></div>
-   <div class="pb"><p class="note">Pick the line it belongs on. Transfer moves it and learns from the choice, on this computer only.</p>
-   <div class="picker">${LINES.filter(l=>l.id!==e.line).map(l=>`<button class="pick" style="--c:${l.color}" data-to="${l.id}">${bullet(l.id,'sm')}${l.folder}</button>`).join('')}</div></div>`);
-  document.querySelectorAll('[data-to]').forEach(b=>b.onclick=async()=>{const n=await api.correct(id,b.dataset.to);fresh.add(n.id);close_();toast(`Moved to ${L(b.dataset.to).folder}. Noted for next time.`);await load()});
+function row(e) {
+  return `<div class="row ${fresh.has(e.id) ? 'fresh' : ''} ${e.undone ? 'undone' : ''}">
+    ${icon(e.line)}
+    <div class="txt"><b title="${esc(e.from)}">${esc(e.name)}</b><span>${esc(srcOf(e.from))} › ${esc(L(e.line).name)}</span></div>
+    <span class="when">${ago(e.ts)}</span>
+    ${e.undone ? '' : `<button class="pill solid undo" data-undo="${e.id}">Undo</button>`}
+  </div>`;
 }
 
 /* ---------- Review ---------- */
-function review(){
-  V().innerHTML=panel('#A7A9AC',[bullet('holding'),'Review'],'Not sure enough to move these on its own',
-   '',S.held.length?`<div class="cards">${S.held.map((h,i)=>`<article class="card">
-     <div style="display:flex;gap:10px;align-items:center">${bullet(h.guess)}<h3>${esc(h.name)}</h3></div>
-     <div class="note">${esc(srcName(h.path))} · ${fmtSize(h.size)} · ${h.guess==='holding'?'no guess':'best guess '+L(h.guess).folder}</div>
-     <div class="conf" style="--c:${L(h.guess).color}" title="Confidence ${pct(h.confidence)}"><i style="width:${Math.max(3,h.confidence*100)}%"></i></div>
-     <ul class="why">${h.reasons.map(r=>`<li>${esc(r)}</li>`).join('')}</ul>
-     <div class="picker" role="group" aria-label="Choose a line">${LINES.map(l=>`<button class="pick" style="--c:${l.color}" aria-pressed="${l.id===h.guess}" data-h="${i}" data-l="${l.id}">${bullet(l.id,'sm')}${l.folder}</button>`).join('')}</div>
-     <div style="display:flex;gap:8px"><button class="btn go" data-go="${i}" ${h.guess==='holding'?'disabled':''}>Move to ${h.guess==='holding'?'…':L(h.guess).folder}</button><button class="btn" data-skip="${i}">Leave it</button></div>
-   </article>`).join('')}</div><p class="note">Every choice here trains the local model. After about 60 corrections it carries roughly half the weight of the content rules.</p>`
-   :'<div class="empty">Nothing waiting. Files Transfer is unsure about will wait here instead of being moved.</div>');
-  V().querySelectorAll('[data-h]').forEach(b=>b.onclick=()=>{const h=S.held[+b.dataset.h];h.guess=b.dataset.l;review()});
-  V().querySelectorAll('[data-go]').forEach(b=>b.onclick=async()=>{const h=S.held[+b.dataset.go];const e=await api.route(h.path,h.guess);fresh.add(e.id);toast(`${h.name} → ${L(h.guess).folder}`);await load()});
-  V().querySelectorAll('[data-skip]').forEach(b=>b.onclick=()=>{S.held.splice(+b.dataset.skip,1);toast('Left in place');render()});
+function review() {
+  const H = S.held;
+  if (!H.length) { $('view').innerHTML = `<span class="h1">Review</span><div class="empty">All clear. Files Transfer isn't sure about wait here instead of moving.</div>`; return; }
+  openHeld = Math.min(openHeld, H.length - 1);
+  const h = H[openHeld];
+  if (!h._pick) h._pick = h.guess !== 'holding' ? h.guess : null;
+  $('view').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:2px"><span class="h1">Review</span><span class="sub">Not sure enough to move these on its own.</span></div>
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:11px">${icon(h._pick || 'holding')}
+        <div class="txt"><b>${esc(h.name)}</b><span>${esc(srcOf(h.path))} · ${size(h.size)} · ${h.guess === 'holding' ? 'no guess' : Math.round(h.confidence * 100) + '% sure'}</span></div></div>
+      ${picker(h._pick)}
+      <div style="display:flex;gap:8px">
+        <button class="btn ghost" style="flex:1" id="bLeave">Leave it</button>
+        <button class="btn solid" style="flex:1.6" id="bGo" ${h._pick ? '' : 'disabled'}>${h._pick ? 'Move to ' + L(h._pick).name : 'Pick a folder'}</button>
+      </div>
+    </div>
+    <div class="list">${H.map((x, i) => i === openHeld ? '' : `<button class="row" data-open="${i}">${icon('holding')}
+      <div class="txt"><b>${esc(x.name)}</b><span>${esc(srcOf(x.path))} · ${x.guess === 'holding' ? 'no guess' : 'maybe ' + L(x.guess).name}</span></div>${svg(P.chevR, 'rgba(255,255,255,.6)', 2)}</button>`).join('')}</div>`;
+  bindPicker(l => { h._pick = l; review(); });
+  $('bLeave').onclick = () => { H.splice(openHeld, 1); render(); };
+  $('bGo').onclick = async () => { const e = await api.route(h.path, h._pick); fresh.add(e.id); H.splice(openHeld, 1); toast(`${h.name} › ${L(h._pick).name}`, e.id); load(); };
+  document.querySelectorAll('[data-open]').forEach(b => b.onclick = () => { openHeld = +b.dataset.open; review(); });
 }
+function picker(sel) {
+  return `<div class="grid" role="group" aria-label="Move to">${LINES.map(l =>
+    `<button data-line="${l.id}" aria-pressed="${l.id === sel}">${svg(P[l.id], l.color)}${l.name}</button>`).join('')}</div>`;
+}
+function bindPicker(fn) { document.querySelectorAll('[data-line]').forEach(b => b.onclick = () => fn(b.dataset.line)); }
 
 /* ---------- History ---------- */
-function history(){
-  const rows=S.history.filter(e=>histFilter==='all'||e.line===histFilter);
-  V().innerHTML=panel('#0039A6',[`<span class="bullet" style="--c:#0039A6">H</span>`,'History'],`${S.history.length} moves logged on this computer`,'',
-   `<div class="filters"><button class="pick" style="--c:#fff" aria-pressed="${histFilter==='all'}" data-f="all">All</button>${LINES.map(l=>`<button class="pick" style="--c:${l.color}" aria-pressed="${histFilter===l.id}" data-f="${l.id}">${bullet(l.id,'sm')}${l.folder}</button>`).join('')}</div>
-    <div class="scroll"><table class="tbl"><thead><tr><th></th><th>File</th><th>From</th><th>Why</th><th>How</th><th class="num">Sure</th><th class="num">When</th><th></th></tr></thead><tbody>
-    ${rows.map(e=>`<tr style="${e.undone?'opacity:.45':''}"><td>${bullet(e.line,'sm')}</td><td><b>${esc(e.name)}</b></td><td>${esc(srcName(e.from))}</td><td class="note">${esc(e.reasons.join(' · '))}</td><td>${esc(e.via)}</td><td class="num">${pct(e.confidence)}</td><td class="num">${ago(e.ts)}</td>
-      <td>${e.undone?'<span class="note">Undone</span>':`<div class="acts"><button class="btn sm" data-undo="${e.id}">Undo</button><button class="btn sm" data-fix="${e.id}">Re-route</button></div>`}</td></tr>`).join('')}
-    </tbody></table></div>${rows.length?'':'<div class="empty">No moves on this line yet.</div>'}`);
-  V().querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{histFilter=b.dataset.f;history()});
-}
-
-/* ---------- Cleanup ---------- */
-function cleanup(){
-  const tot=S.stale.reduce((a,s)=>a+s.size,0);
-  V().innerHTML=panel('#EE352E',[bullet('installers'),'Cleanup'],`Installers older than ${S.settings.stale_installer_days} days`,
-   S.stale.length?`<button class="btn warn" id="trashAll">Move all to Trash · ${fmtSize(tot)}</button>`:'',
-   S.stale.length?`<p class="note" style="margin:0">You've already installed these. They go to the ${navigator.platform.startsWith('Win')?'Recycle Bin':'Trash'}, so you can still get them back.</p>
-    <div class="board">${S.stale.map(s=>`<div class="dep">${bullet('installers')}<div class="nm"><b>${esc(s.name)}</b><span>${esc(srcName(dirOf(s.path)+'/x'))}/Installers · last touched ${s.age_days} days ago</span></div><div class="meta">${fmtSize(s.size)}<i>${s.age_days} d</i></div><div class="acts"><button class="btn sm" data-t="${esc(s.path)}">Trash</button></div></div>`).join('')}</div>`
-   :'<div class="empty">No stale installers. Nice.</div>');
-  const confirmTrash=(paths,label)=>sheet(`<div class="ph" style="--c:#EE352E">${bullet('installers')}<h2>Move to Trash?</h2><span class="sub">${esc(label)}</span><span class="sp"></span></div>
-     <div class="pb"><p style="margin:0">${paths.length} installer${paths.length>1?'s':''} will go to the Trash. Nothing is permanently deleted.</p><div style="display:flex;gap:8px"><button class="btn warn" id="yes">Move to Trash</button><button class="btn" data-close>Keep them</button></div></div>`,
-     ()=>{document.getElementById('yes').onclick=async()=>{await api.trash(paths);close_();toast(`Moved ${paths.length} to Trash`);await load()}});
-  const all=document.getElementById('trashAll');if(all)all.onclick=()=>confirmTrash(S.stale.map(s=>s.path),fmtSize(tot)+' total');
-  V().querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>confirmTrash([b.dataset.t],base(b.dataset.t)));
+function history() {
+  const q = query.toLowerCase();
+  const rows = S.history.filter(e => !q || e.name.toLowerCase().includes(q));
+  const groups = {};
+  rows.forEach(e => { const d = new Date(e.ts * 1e3); const k = d.toDateString() === new Date().toDateString() ? 'Today' : d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }); (groups[k] = groups[k] || []).push(e); });
+  $('view').innerHTML = `
+    <div style="display:flex;align-items:baseline;justify-content:space-between"><span class="h1">History</span><span class="sub">Every move can be undone</span></div>
+    <label class="search chip">${svg(P.search, 'rgba(255,255,255,.7)')}<input id="q" placeholder="Search moves" aria-label="Search moves" value="${esc(query)}"></label>
+    ${Object.entries(groups).map(([k, es]) => `<div class="list"><span class="label" style="padding:4px 6px">${esc(k)}</span>${es.map(e =>
+      openMove === e.id ? `<div class="card">${row(e)}${picker(e.line)}</div>` : row(e).replace('<div class="row', `<div data-move="${e.id}" class="row`)).join('')}</div>`).join('')
+    || '<div class="empty">No moves match.</div>'}`;
+  const qi = $('q'); qi.oninput = () => { query = qi.value; const pos = qi.selectionStart; history(); const n = $('q'); n.focus(); n.setSelectionRange(pos, pos); };
+  document.querySelectorAll('[data-move]').forEach(r => r.onclick = ev => { if (ev.target.closest('[data-undo]')) return; openMove = +r.dataset.move; history(); });
+  bindPicker(async l => { const id = openMove; openMove = null; const e = await api.correct(id, l); fresh.add(e.id); toast(`Moved to ${L(l).name}. Noted for next time.`); load(); });
 }
 
 /* ---------- Settings ---------- */
-function prefs(){
-  const s=S.settings;
-  V().innerHTML=`<div class="grid2">
-   ${panel('#8c8a84',[`<span class="bullet" style="--c:#3a3d45">⚙</span>`,'Settings'],'Saved on this computer','',
-    `<div class="set"><span class="lbl">Folders to watch</span><p>Only loose files at the top level are sorted. Subfolders are yours.</p></div>
-     ${s.sources.map((x,i)=>`<div class="src"><input type="checkbox" class="sw" id="src${i}" ${x.enabled?'checked':''} aria-label="Watch ${esc(base(x.path))}"><b>${esc(base(x.path))}</b><code>${esc(x.path)}</code></div>`).join('')}
-     <div class="set"><label for="conf">Confidence to move</label><p>Below this, a file waits in Review instead of moving.</p><div class="ctl"><input type="range" id="conf" min="0.4" max="0.95" step="0.05" value="${s.confidence}"><b id="confv">${pct(s.confidence)}</b></div></div>
-     <div class="set"><label for="stale">Flag installers after</label><p>Old setup files show up in Cleanup.</p><div class="ctl"><input type="range" id="stale" min="7" max="120" step="1" value="${s.stale_installer_days}"><b id="stalev">${s.stale_installer_days} d</b></div></div>
-     <div class="set"><label for="settle">Wait before moving</label><p>A new file must sit still this long, so downloads in progress are never grabbed.</p><div class="ctl"><input type="range" id="settle" min="2" max="60" step="1" value="${s.settle_secs}"><b id="settlev">${s.settle_secs} s</b></div></div>
-     <div class="set"><label for="login">Open at login</label><p>Runs quietly from the menu bar / system tray.</p><div class="ctl"><input type="checkbox" class="sw" id="login" ${s.launch_at_login?'checked':''}></div></div>`)}
-   ${panel('#00933C',[`<span class="bullet" style="--c:#00933C">✓</span>`,'Privacy'],'What Transfer keeps','',
-    `<p style="margin:0">Transfer reads the first 8 KB of a file to see what it is, decides, and forgets. It has no network code and no account. These three files in your app data folder are everything it stores:</p>
-     <div class="files">
-      <div class="file"><code>settings.txt</code><span>The choices on this screen.</span></div>
-      <div class="file"><code>journal.tsv</code><span>Each move: from, to, when, why. Powers Undo.</span></div>
-      <div class="file"><code>model.tsv</code><span>What it learned from your corrections, as hashed numbers. No names or words.</span></div>
-     </div>
-     <p class="note">Delete any of them to reset that part.</p>`)}
-  </div>`;
-  const save=async()=>{await api.saveSettings(S.settings)};
-  s.sources.forEach((x,i)=>document.getElementById('src'+i).onchange=e=>{x.enabled=e.target.checked;save();nav()});
-  const rng=(id,key,fmt,num=Number)=>{const el=document.getElementById(id);el.oninput=()=>{s[key]=num(el.value);document.getElementById(id+'v').textContent=fmt(s[key])};el.onchange=save};
-  rng('conf','confidence',pct);rng('stale','stale_installer_days',v=>v+' d');rng('settle','settle_secs',v=>v+' s');
-  document.getElementById('login').onchange=e=>{s.launch_at_login=e.target.checked;save()};
+function settings() {
+  const s = S.settings;
+  $('view').innerHTML = `
+    <span class="h1">Settings</span>
+    <div style="display:flex;flex-direction:column;gap:6px"><span class="label">Watching</span>
+      <div class="group">${s.sources.map((x, i) => `<label class="set"><span>${esc(base(x.path))}</span><input type="checkbox" class="sw" id="src${i}" ${x.enabled ? 'checked' : ''}></label>`).join('')}</div></div>
+    <div style="display:flex;flex-direction:column;gap:6px"><span class="label">Sorting</span>
+      <div class="group">
+        <label class="set"><span>Move when sure</span><input type="range" id="conf" min="40" max="95" step="5" value="${Math.round(s.confidence * 100)}"><output id="confO">${Math.round(s.confidence * 100)}%</output></label>
+        <label class="set"><span>Wait before moving</span><input type="range" id="settle" min="2" max="60" value="${s.settle_secs}"><output id="settleO">${s.settle_secs} s</output></label>
+        <label class="set"><span>Flag old installers</span><input type="range" id="stale" min="7" max="120" value="${s.stale_installer_days}"><output id="staleO">${s.stale_installer_days} d</output></label>
+      </div></div>
+    <div class="group"><label class="set"><span>Open at login</span><input type="checkbox" class="sw" id="login" ${s.launch_at_login ? 'checked' : ''}></label></div>
+    <div class="note">${svg(P.lock, 'currentColor')}<span>Runs only on this computer. Nothing is uploaded.</span></div>`;
+  const save = () => api.saveSettings(s);
+  s.sources.forEach((x, i) => $('src' + i).onchange = e => { x.enabled = e.target.checked; save(); });
+  const rng = (id, set, fmt) => { const el = $(id); el.oninput = () => { set(+el.value); $(id + 'O').textContent = fmt(+el.value); }; el.onchange = save; };
+  rng('conf', v => s.confidence = v / 100, v => v + '%');
+  rng('settle', v => s.settle_secs = v, v => v + ' s');
+  rng('stale', v => s.stale_installer_days = v, v => v + ' d');
+  $('login').onchange = e => { s.launch_at_login = e.target.checked; save(); };
 }
 
-/* ---------- sheet + toast ---------- */
-function sheet(html,after){
-  const L_=document.getElementById('layer');
-  L_.innerHTML=`<div class="scrim" id="scrim"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`;
-  L_.querySelectorAll('[data-close]').forEach(b=>b.onclick=close_);
-  document.getElementById('scrim').onclick=e=>{if(e.target.id==='scrim')close_()};
-  after&&after();
-  L_.querySelector('button')?.focus();
+/* ---------- Sweep (dry run first) ---------- */
+async function sweep() {
+  const plans = await api.plan();
+  const moves = plans.flatMap(p => p.moves);
+  const by = {}; moves.forEach(m => (by[m.line] = by[m.line] || []).push(m));
+  const order = LINES.filter(l => by[l.id]);
+  let open = order[0] && order[0].id;
+  $('view').style.visibility = $('foot').style.visibility = $('topRight').style.visibility = 'hidden';
+  const draw = () => {
+    $('layer').innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-label="Sweep">
+      <div style="display:flex;flex-direction:column;gap:2px"><span class="h1">Sweep</span>
+        <span class="sub">${moves.length ? `${moves.length} loose file${moves.length > 1 ? 's are' : ' is'} ready. Nothing has moved yet.` : 'Everything is already sorted.'}</span></div>
+      <div class="body">${order.length ? `<div class="group">${order.map(l => `<div>
+        <button class="set" style="width:100%" data-g="${l.id}">${icon(l.id, 'sm')}<span style="text-align:left">${l.name}</span><output>${by[l.id].length}</output>${svg(open === l.id ? P.chevD : P.chevR, 'rgba(255,255,255,.6)', 2.4).replace('<svg', '<svg style="width:12px;height:12px"')}</button>
+        ${open === l.id ? `<div style="display:flex;flex-direction:column;gap:3px;padding:0 12px 10px 48px">${by[l.id].map(m => `<div style="display:flex;gap:8px;font-size:12px"><span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(m.name)}</span><span style="color:var(--fg-3)">${esc(srcOf(m.from))}</span></div>`).join('')}</div>` : ''}
+      </div>`).join('')}</div>` : ''}</div>
+      <div style="display:flex;gap:8px"><button class="btn ghost" style="flex:1" id="sNo">${moves.length ? 'Cancel' : 'Close'}</button>
+        ${moves.length ? `<button class="btn solid" style="flex:1.4" id="sYes">Move ${moves.length} file${moves.length > 1 ? 's' : ''}</button>` : ''}</div></div>`;
+    document.querySelectorAll('[data-g]').forEach(b => b.onclick = () => { open = open === b.dataset.g ? null : b.dataset.g; draw(); });
+    $('sNo').onclick = closeSheet;
+    const y = $('sYes'); if (y) y.onclick = async () => { y.disabled = true; const done = await api.applyAll(); done.forEach(e => fresh.add(e.id)); closeSheet(); toast(`Moved ${done.length} file${done.length === 1 ? '' : 's'}`); load(); };
+  };
+  draw();
 }
-function close_(){document.getElementById('layer').innerHTML=''}
-addEventListener('keydown',e=>{if(e.key==='Escape')close_()});
-let tt;function toast(msg,undoId){
-  document.querySelector('.toast')?.remove();clearTimeout(tt);
-  const t=document.createElement('div');t.className='toast';t.setAttribute('role','status');
-  t.innerHTML=`<span>${esc(msg)}</span>${undoId?`<button>Undo</button>`:''}`;
-  document.body.appendChild(t);
-  if(undoId)t.querySelector('button').onclick=async()=>{await api.undo(undoId);t.remove();await load()};
-  tt=setTimeout(()=>t.remove(),4200);
+function closeSheet() { $('layer').innerHTML = ''; $('view').style.visibility = $('foot').style.visibility = $('topRight').style.visibility = ''; }
+addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
+
+/* ---------- shared actions ---------- */
+async function togglePause() { S.settings.paused = !S.settings.paused; await api.saveSettings(S.settings); render(); }
+$('view').addEventListener('click', async ev => {
+  const u = ev.target.closest('[data-undo]'); if (!u) return;
+  ev.stopPropagation(); const e = await api.undo(+u.dataset.undo); toast(`Put ${e.name} back`); load();
+});
+let tt;
+function toast(msg, undoId) {
+  document.querySelector('.toast')?.remove(); clearTimeout(tt);
+  const t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status');
+  t.innerHTML = `<span>${esc(msg)}</span>${undoId ? '<button class="pill ghost">Undo</button>' : ''}`;
+  $('win').appendChild(t);
+  if (undoId) t.querySelector('button').onclick = async () => { await api.undo(undoId); t.remove(); load(); };
+  tt = setTimeout(() => t.remove(), 4000);
 }
 
-api.onMoved(async e=>{fresh.add(e.id);await load();toast(`${e.name} → ${L(e.line).folder}`,e.id)});
-if(T){T.event.listen('transfer://state',()=>load());T.event.listen('transfer://sweep',()=>{location.hash='service';sweep()})}
+/* ---------- window controls ---------- */
+const W = T && T.window && T.window.getCurrentWindow ? T.window.getCurrentWindow() : null;
+let onTop = false;
+$('bClose').onclick = () => W ? W.close() : null;
+$('bMin').onclick = () => W ? W.minimize() : null;
+$('bTop').onclick = async () => { if (!W) return; onTop = !onTop; await W.setAlwaysOnTop(onTop); toast(onTop ? 'Staying on top' : 'Back to normal'); };
+
+/* ---------- live events from the engine ---------- */
+if (T) {
+  api.on('transfer://moved', async payload => { const e = JSON.parse(payload); fresh.add(e.id); await load(); toast(`${e.name} › ${L(e.line).name}`, e.id); });
+  api.on('transfer://state', () => load());
+  api.on('transfer://sweep', () => { location.hash = 'home'; sweep(); });
+}
 load();
+
+/* ---------- demo data (browser only) ---------- */
+function demoApi() {
+  const now = Date.now() / 1e3, H = 'C:/Users/nathan/';
+  let id = 0; const hist = [];
+  const mv = (src, name, line, mins, via = 'auto') => hist.unshift({ id: ++id, ts: now - mins * 60, name, from: H + src + '/' + name, to: H + src + '/' + L(line).name + '/' + name, line, confidence: .95, reasons: [], undone: false, via });
+  mv('Downloads', 'hyperpop_ref.mp3', 'audio', 64); mv('Downloads', 'APBio_Lab7_rubric.pdf', 'docs', 21);
+  mv('Desktop', 'Screenshot 2026-11-01 142233.png', 'images', 9); mv('Downloads', 'BlenderSetup-4.2.1-x64.msi', 'installers', 2);
+  mv('Downloads', 'IMG_4417.MOV', 'videos', 0);
+  let held = [
+    { name: 'ffmpeg-7.1-win64.zip', path: H + 'Downloads/ffmpeg-7.1-win64.zip', guess: 'installers', confidence: .55, size: 78e6 },
+    { name: 'dataset.bin', path: H + 'Downloads/dataset.bin', guess: 'holding', confidence: 0, size: 5e6 },
+    { name: 'Infill_parcels_export', path: H + 'Documents/Infill_parcels_export', guess: 'docs', confidence: .48, size: 2.3e6 },
+  ];
+  let stale = [{ name: 'DiscordSetup.exe', path: H + 'Downloads/Installers/DiscordSetup.exe', age_days: 60, size: 96e6 }, { name: 'vlc-3.0.20-win64.exe', path: H + 'Downloads/Installers/vlc-3.0.20-win64.exe', age_days: 45, size: 42e6 }];
+  const settings = { sources: ['Desktop', 'Downloads', 'Documents'].map(n => ({ path: H + n, enabled: n !== 'Documents' })), confidence: .6, stale_installer_days: 30, settle_secs: 8, paused: false, launch_at_login: true };
+  const pending = [['Downloads', 'edit_v3_final.mkv', 'videos'], ['Downloads', 'xc_meet_finish.mp4', 'videos'], ['Desktop', 'IMG_4420.MOV', 'videos'], ['Downloads', 'GoogleChrome.pkg', 'installers'], ['Desktop', 'untitled', 'images'], ['Desktop', 'ideas.txt', 'docs'], ['Desktop', 'SMC Portal.url', 'shortcuts']]
+    .map(([s, n, l]) => ({ name: n, from: H + s + '/' + n, to: '', line: l, confidence: .9, reasons: [], size: 1000 }));
+  let swept = false;
+  const R = x => Promise.resolve(JSON.parse(JSON.stringify(x)));
+  return {
+    state: () => R({ stats: { today: hist.filter(e => !e.undone).length + 406, total: 0, learned_examples: 0 }, history: hist, settings, held, stale }),
+    plan: () => R([{ source: H, moves: swept ? [] : pending, held: [], stale: [] }]),
+    applyAll: () => { const out = []; if (!swept) { pending.forEach(m => { mv(srcOf(m.from), m.name, m.line, 0, 'sweep'); out.push(hist[0]); }); swept = true; } return R(out); },
+    undo: i => { const e = hist.find(x => x.id === i); e.undone = true; return R(e); },
+    correct: (i, line) => { const e = hist.find(x => x.id === i); e.undone = true; mv(srcOf(e.from), e.name, line, 0, 'correction'); return R(hist[0]); },
+    route: (path, line) => { const h = held.find(x => x.path === path); held = held.filter(x => x !== h); mv(srcOf(path), h.name, line, 0, 'correction'); return R(hist[0]); },
+    trash: paths => { stale = stale.filter(s => !paths.includes(s.path)); return R(paths.length); },
+    saveSettings: s => { Object.assign(settings, s); return R(true); },
+    on: () => {},
+  };
+}

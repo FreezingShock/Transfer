@@ -11,7 +11,7 @@ use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
-use tauri::tray::TrayIconBuilder;
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use transfer_core::engine::Engine;
@@ -180,7 +180,20 @@ fn main() {
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("Transfer")
                 .menu(&menu)
-                .show_menu_on_left_click(true)
+                .show_menu_on_left_click(false)
+                .on_tray_icon_event(|tray, ev| {
+                    // left click opens/hides the window; right click shows the menu
+                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = ev {
+                        let app = tray.app_handle();
+                        if let Some(w) = app.get_webview_window("main") {
+                            if w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false) {
+                                let _ = w.hide();
+                            } else {
+                                show(app);
+                            }
+                        }
+                    }
+                })
                 .on_menu_event(|app, ev| match ev.id.as_ref() {
                     "open" => show(app),
                     "pause" => toggle_pause(app),
