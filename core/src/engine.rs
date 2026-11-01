@@ -109,6 +109,29 @@ impl Engine {
         if meta.is_dir() {
             return false; // folders (and .app bundles) are left alone
         }
+        // never move the running app itself
+        if let Ok(me) = std::env::current_exe() {
+            if same_file(&me, path) {
+                return false;
+            }
+        }
+        // Windows: hidden/system items (My Music, My Pictures, My Videos junctions,
+        // desktop.ini, thumbnails) and any reparse point that targets a folder
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            const HIDDEN: u32 = 0x2;
+            const SYSTEM: u32 = 0x4;
+            const DIRECTORY: u32 = 0x10;
+            let a = meta.file_attributes();
+            if a & (HIDDEN | SYSTEM | DIRECTORY) != 0 {
+                return false;
+            }
+        }
+        // a symlink that points at a folder is a folder link, not a desktop shortcut
+        if meta.file_type().is_symlink() && std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false) && !cfg!(target_os = "macos") {
+            return false;
+        }
         let age = meta
             .modified()
             .ok()
@@ -301,6 +324,13 @@ impl Engine {
 }
 
 // -------------------------------------------------------------- fs helpers --
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => false,
+    }
+}
 
 /// exists() follows symlinks; a shortcut to a missing app still "exists" here.
 fn present(p: &Path) -> bool {
