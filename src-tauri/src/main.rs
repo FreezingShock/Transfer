@@ -2,8 +2,9 @@
 //
 // Thin by design: all sorting logic lives in transfer-core (std-only, no
 // network). This file wires it to a window, a tray icon and launch-at-login.
-// The only plugin is autostart; no fs/shell/http plugins are installed, so the
-// web UI cannot touch the disk or the network except through the commands below.
+// Plugins: autostart, and dialog (used only from Rust for the folder picker).
+// No fs/shell/http plugins are installed, so the web UI cannot touch the disk or
+// the network except through the commands below.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -15,7 +16,8 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use transfer_core::engine::Engine;
-use transfer_core::settings::Source;
+use tauri_plugin_dialog::DialogExt;
+use transfer_core::settings::{Mode, Source};
 use transfer_core::watch::{self, WatchEvent, WatchHandle};
 use transfer_core::{json, Line};
 
@@ -37,18 +39,39 @@ fn get_state(app: State<App>) -> String {
     json::state(&app.eng.lock().unwrap())
 }
 
-/// Dry run across all watched folders. Moves nothing.
+/// The plans for one watched folder, or every folder a sweep covers.
+fn plans_for(e: &Engine, source: &Option<String>) -> Vec<transfer_core::Plan> {
+    match source {
+        Some(p) => {
+            let p = PathBuf::from(p);
+            match e.settings.sources.iter().find(|s| s.path == p && s.mode != Mode::Off) {
+                Some(s) => vec![e.plan(&s.path, 2)],
+                None => vec![],
+            }
+        }
+        None => e.plan_all(2),
+    }
+}
+
+/// Dry run. Moves nothing.
 #[tauri::command]
-fn plan(app: State<App>) -> String {
-    json::plans(&app.eng.lock().unwrap().plan_all(2))
+fn plan(app: State<App>, source: Option<String>) -> String {
+    json::plans(&plans_for(&app.eng.lock().unwrap(), &source))
 }
 
 #[tauri::command]
-fn apply_all(app: State<App>) -> String {
+fn apply(app: State<App>, source: Option<String>) -> String {
     let mut e = app.eng.lock().unwrap();
-    let moves: Vec<_> = e.plan_all(2).into_iter().flat_map(|p| p.moves).collect();
+    let moves: Vec<_> = plans_for(&e, &source).into_iter().flat_map(|p| p.moves).collect();
     let done: Vec<_> = e.apply(&moves, "sweep").into_iter().filter_map(Result::ok).collect();
     json::entries(&done)
+}
+
+/// Native folder picker. Runs off the main thread (async command).
+#[tauri::command]
+async fn pick_folder(handle: AppHandle) -> Option<String> {
+    let picked = handle.dialog().file().set_title("Choose a folder for Transfer to watch").blocking_pick_folder()?;
+    picked.into_path().ok().map(|p| p.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
@@ -68,7 +91,7 @@ fn route(app: State<App>, path: String, line: String) -> Res {
     let mut e = app.eng.lock().unwrap();
     // only files that sit directly in a watched folder can be routed
     let p = PathBuf::from(&path);
-    if !e.settings.active_sources().any(|s| p.parent() == Some(s.as_path())) {
+    if !e.settings.sweep_sources().any(|s| p.parent() == Some(s.as_path())) {
         return Err("that file isn't in a watched folder".into());
     }
     e.route(&p, l).map(|x| json::entry(&x))
@@ -83,7 +106,12 @@ fn trash(app: State<App>, paths: Vec<String>) -> Result<usize, String> {
 #[derive(Deserialize)]
 struct SourceDto {
     path: String,
-    enabled: bool,
+    mode: String,
+    lines: Vec<String>,
+    #[serde(default)]
+    custom: bool,
+    #[serde(default)]
+    color: String,
 }
 #[derive(Deserialize)]
 struct SettingsDto {
@@ -93,6 +121,8 @@ struct SettingsDto {
     settle_secs: u64,
     paused: bool,
     launch_at_login: bool,
+    #[serde(default)]
+    theme: Option<String>,
 }
 
 #[tauri::command]
@@ -103,8 +133,18 @@ fn save_settings(handle: AppHandle, app: State<App>, settings: SettingsDto) -> R
         s.sources = settings
             .sources
             .into_iter()
-            .map(|x| Source { path: PathBuf::from(x.path), enabled: x.enabled })
+            .filter(|x| PathBuf::from(&x.path).is_dir())
+            .map(|x| Source {
+                path: PathBuf::from(x.path),
+                mode: Mode::parse(&x.mode),
+                lines: x.lines.iter().filter_map(|l| Line::parse(l)).filter(|l| *l != Line::Holding).collect(),
+                custom: x.custom,
+                color: x.color.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '#').take(9).collect(),
+            })
             .collect();
+        if let Some(t) = settings.theme.filter(|t| ["system", "light", "dark"].contains(&t.as_str())) {
+            s.theme = t;
+        }
         s.confidence = settings.confidence.clamp(0.3, 0.99);
         s.stale_installer_days = settings.stale_installer_days.max(1);
         s.settle_secs = settings.settle_secs.max(1);
@@ -151,10 +191,11 @@ fn main() {
     let eng = Arc::new(Mutex::new(eng));
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .manage(App { eng: eng.clone(), _watch: Mutex::new(None) })
         .invoke_handler(tauri::generate_handler![
-            get_state, plan, apply_all, undo, correct, route, trash, save_settings
+            get_state, plan, apply, pick_folder, undo, correct, route, trash, save_settings
         ])
         .setup(move |app| {
             // live watcher → UI event per move

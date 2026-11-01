@@ -74,7 +74,8 @@ svg{width:16px;height:16px;flex:none}
   box-shadow:inset 0 1px 0 var(--hi),0 2px 8px rgba(0,0,0,.12);transition:left .42s var(--spring),width .42s var(--spring),transform .3s var(--bounce)}
 .seg .ind.squash{transform:scaleY(.82)}
 .seg.small>button{height:26px;font-size:12px}
-.folders{overflow-x:auto;scrollbar-width:none}
+.folders{overflow-x:auto;scrollbar-width:none;flex:none;max-height:44px;transition:max-height .38s var(--out),opacity .22s ease,margin .38s var(--out),padding .38s var(--out),border-width .38s}
+.folders.hidden{max-height:0;opacity:0;margin-top:-12px;padding-top:0;padding-bottom:0;border-width:0;pointer-events:none}
 .folders::-webkit-scrollbar{display:none}
 .folders>button{flex:0 0 auto;padding:0 12px}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--c);flex:none}

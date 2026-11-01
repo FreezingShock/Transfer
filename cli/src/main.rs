@@ -21,7 +21,7 @@ fn main() {
     let mut eng = Engine::open(Engine::default_home()).expect("open data folder");
     let dirs_from = |r: &[String], eng: &mut Engine| -> Vec<PathBuf> {
         if r.is_empty() {
-            eng.settings.active_sources().cloned().collect()
+            eng.settings.sweep_sources().cloned().collect()
         } else {
             r.iter().map(PathBuf::from).collect()
         }
@@ -51,7 +51,7 @@ fn main() {
             if !rest.is_empty() {
                 eng.settings.sources = dirs
                     .iter()
-                    .map(|p| transfer_core::settings::Source { path: p.clone(), enabled: true })
+                    .map(|p| transfer_core::settings::Source::new(p.clone(), transfer_core::settings::Mode::Auto))
                     .collect();
             }
             println!("watching {} folder(s). Ctrl-C to stop.", dirs.len());

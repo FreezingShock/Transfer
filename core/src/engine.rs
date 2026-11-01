@@ -160,6 +160,10 @@ impl Engine {
                 plan.skipped += 1;
                 continue;
             };
+            if v.line != Line::Holding && !self.allowed(&path, v.line) {
+                plan.skipped += 1; // this folder doesn't sort that type: leave it
+                continue;
+            }
             if v.line == Line::Holding {
                 plan.held.push(Held { path, guess: v.guess, confidence: v.confidence, reasons: v.reasons, size });
             } else {
@@ -172,8 +176,13 @@ impl Engine {
     }
 
     pub fn plan_all(&self, min_age_secs: u64) -> Vec<Plan> {
-        let srcs: Vec<PathBuf> = self.settings.active_sources().cloned().collect();
+        let srcs: Vec<PathBuf> = self.settings.sweep_sources().cloned().collect();
         srcs.iter().map(|s| self.plan(s, min_age_secs)).collect()
+    }
+
+    /// Does the folder this file sits in sort this type? Unwatched folders allow everything.
+    fn allowed(&self, file: &Path, line: Line) -> bool {
+        self.settings.source_of(file).map(|s| s.allows(line)).unwrap_or(true)
     }
 
     fn stale_installers(&self, dir: &Path) -> Vec<Stale> {
@@ -214,7 +223,7 @@ impl Engine {
             return None;
         }
         let (v, _, _) = self.verdict(path).ok()?;
-        if v.line == Line::Holding {
+        if v.line == Line::Holding || !self.allowed(path, v.line) {
             return None;
         }
         let to = unique_dest(path.parent()?, v.line, path);

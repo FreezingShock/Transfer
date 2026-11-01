@@ -107,6 +107,8 @@ function chrome(animateInd = true) {
   win.style.setProperty('--acc', folder && src() ? colorOf(src()) : '#8e8cf5');
   // folders bar
   const f = $('folders');
+  const hideBar = cur() === 'settings';
+  f.classList.toggle('hidden', hideBar); f.toggleAttribute('inert', hideBar); f.setAttribute('aria-hidden', hideBar);
   f.innerHTML = `<button class="press" data-f="" ${!folder ? 'aria-pressed="true"' : 'aria-pressed="false"'}>All</button>` +
     sources().map(s => `<button class="press" data-f="${esc(s.path)}" aria-pressed="${s.path === folder}" style="--c:${colorOf(s)}" title="${esc(s.path)}">
       <span class="dot" style="opacity:${s.mode === 'off' ? .35 : 1}"></span>${esc(base(s.path))}</button>`).join('') +

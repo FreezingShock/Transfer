@@ -125,13 +125,21 @@ pub fn stats(st: &Stats) -> String {
 
 pub fn settings(st: &Settings) -> String {
     format!(
-        r#"{{"sources":{},"confidence":{},"stale_installer_days":{},"settle_secs":{},"paused":{},"launch_at_login":{}}}"#,
-        arr(&st.sources, |x| format!(r#"{{"path":{},"enabled":{}}}"#, p(&x.path), x.enabled)),
+        r#"{{"sources":{},"confidence":{},"stale_installer_days":{},"settle_secs":{},"paused":{},"launch_at_login":{},"theme":{}}}"#,
+        arr(&st.sources, |x| format!(
+            r#"{{"path":{},"mode":"{}","lines":{},"custom":{},"color":{}}}"#,
+            p(&x.path),
+            x.mode.id(),
+            arr(&x.lines, |l| s(l.id())),
+            x.custom,
+            s(&x.color)
+        )),
         st.confidence,
         st.stale_installer_days,
         st.settle_secs,
         st.paused,
-        st.launch_at_login
+        st.launch_at_login,
+        s(&st.theme)
     )
 }
 
@@ -140,14 +148,21 @@ pub fn state(e: &crate::engine::Engine) -> String {
     let plans = e.plan_all(e.settings.settle_secs);
     let held: Vec<Held> = plans.iter().flat_map(|p| p.held.clone()).collect();
     let stale_v: Vec<Stale> = plans.iter().flat_map(|p| p.stale.clone()).collect();
+    // files waiting for a sweep, per folder (what "Ask first" folders show)
+    let pending = plans
+        .iter()
+        .map(|pl| format!("{}:{}", p(&pl.source), pl.moves.len()))
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        r#"{{"stats":{},"history":{},"settings":{},"held":{},"stale":{},"lines":{}}}"#,
+        r#"{{"stats":{},"history":{},"settings":{},"held":{},"stale":{},"lines":{},"pending":{{{}}}}}"#,
         stats(&e.stats()),
         entries(&e.journal.recent(500)),
         settings(&e.settings),
         arr(&held, held_one),
         arr(&stale_v, stale),
-        lines()
+        lines(),
+        pending
     )
 }
 fn held_one(h: &Held) -> String {
