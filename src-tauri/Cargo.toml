@@ -14,7 +14,6 @@ tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 
 [profile.release]
-lto = true
-codegen-units = 1
+# Fast CI builds; the app is small either way.
 strip = true
 opt-level = "s"
