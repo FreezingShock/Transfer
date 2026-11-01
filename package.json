@@ -1,0 +1,14 @@
+{
+  "name": "transfer",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Automatic, on-device sorting for Desktop, Downloads and Documents",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "icons": "tauri icon src-tauri/icons/icon.png"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0"
+  }
+}

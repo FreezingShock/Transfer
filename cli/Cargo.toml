@@ -1,0 +1,12 @@
+[package]
+name = "transfer-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "transfer"
+path = "src/main.rs"
+
+[dependencies]
+transfer-core = { path = "../core" }

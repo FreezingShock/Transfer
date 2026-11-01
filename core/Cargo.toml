@@ -1,0 +1,10 @@
+[package]
+name = "transfer-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "On-device file classifier, planner, mover and undo journal for Transfer. Zero dependencies: std only."
+
+# Intentionally empty. No third-party code reads your files, and no crate in
+# here can open a network socket.
+[dependencies]
