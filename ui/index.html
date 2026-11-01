@@ -65,6 +65,9 @@ svg{width:16px;height:16px;flex:none}
 .lights svg{opacity:0;width:8px;height:8px;transition:opacity .15s}
 .lights:hover svg{opacity:.75}
 .l-r{background:#ff5f57}.l-y{background:#febc2e}.l-g{background:#28c840}
+/* Windows: controls live top-right, close outermost (minimize, on-top, close) */
+.os-win .top{flex-direction:row-reverse}
+.os-win .lights{flex-direction:row-reverse}
 .drag{flex:1;align-self:stretch}
 .glass{background:var(--s1);border:1px solid var(--edge);box-shadow:inset 0 1px 0 var(--hi)}
 .live{display:flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:13px;font-size:12px;font-weight:600}

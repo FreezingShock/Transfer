@@ -47,6 +47,7 @@ const within = (file, folder) => norm(file).startsWith(norm(folder) + '/');
 
 /* ---------- bridge ---------- */
 const T = window.__TAURI__;
+if (/Windows/i.test(navigator.userAgent)) document.documentElement.classList.add('os-win');
 if (T) document.documentElement.classList.add('native'), document.body.classList.add('native');
 const api = T ? {
   state: () => T.core.invoke('get_state').then(JSON.parse),
