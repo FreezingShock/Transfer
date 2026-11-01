@@ -2,7 +2,8 @@
 //
 // Thin by design: all sorting logic lives in transfer-core (std-only, no
 // network). This file wires it to a window, a tray icon and launch-at-login.
-// Plugins: autostart, and dialog (used only from Rust for the folder picker).
+// Plugins: autostart; dialog, opener and notification are called only from Rust
+// (folder picker, opening/revealing files, move notices).
 // No fs/shell/http plugins are installed, so the web UI cannot touch the disk or
 // the network except through the commands below.
 
@@ -17,6 +18,9 @@ use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use transfer_core::engine::Engine;
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_opener::OpenerExt;
+use transfer_core::browse;
 use transfer_core::settings::{Mode, Source};
 use transfer_core::watch::{self, WatchEvent, WatchHandle};
 use transfer_core::{json, Line};
@@ -95,6 +99,61 @@ fn route(app: State<App>, path: String, line: String) -> Res {
         return Err("that file isn't in a watched folder".into());
     }
     e.route(&p, l).map(|x| json::entry(&x))
+}
+
+/// Only paths inside a watched folder (or its sorted folders) can be opened.
+fn watched(e: &Engine, path: &str) -> Result<(PathBuf, bool), String> {
+    let p = PathBuf::from(path);
+    let is_folder = e.settings.sources.iter().any(|s| {
+        p == s.path || (p.parent() == Some(s.path.as_path()) && p.file_name().and_then(|n| n.to_str()).and_then(Line::from_folder).is_some())
+    });
+    if is_folder || browse::owner(&e.settings, &p).is_some() {
+        Ok((p, is_folder))
+    } else {
+        Err("that isn't in a watched folder".into())
+    }
+}
+
+#[tauri::command]
+fn open_path(handle: AppHandle, app: State<App>, path: String) -> Result<(), String> {
+    let (p, is_folder) = watched(&app.eng.lock().unwrap(), &path)?;
+    // a sorted folder that doesn't exist yet: make it so Explorer has something to open
+    if is_folder && !p.exists() {
+        std::fs::create_dir_all(&p).ok();
+    }
+    handle.opener().open_path(p.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn reveal(handle: AppHandle, app: State<App>, path: String) -> Result<(), String> {
+    let (p, _) = watched(&app.eng.lock().unwrap(), &path)?;
+    handle.opener().reveal_item_in_dir(p).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn move_to(app: State<App>, path: String, line: String) -> Res {
+    let l = self::line(&line)?;
+    app.eng.lock().unwrap().move_to(&PathBuf::from(path), l).map(|e| json::entry(&e))
+}
+
+#[tauri::command]
+fn search(app: State<App>, query: String) -> String {
+    let settings = app.eng.lock().unwrap().settings.clone();
+    json::files(&browse::search(&settings, &query, 60))
+}
+
+/// Can read every candidate file, so it runs off the UI thread and without
+/// holding the engine lock (the watcher keeps working meanwhile).
+#[tauri::command]
+async fn duplicates(app: State<'_, App>) -> Result<String, String> {
+    let settings = app.eng.lock().unwrap().settings.clone();
+    Ok(json::duplicates(&browse::duplicates(&settings)))
+}
+
+#[tauri::command]
+fn trash_files(app: State<App>, paths: Vec<String>) -> Result<usize, String> {
+    let p: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    app.eng.lock().unwrap().trash_watched(&p)
 }
 
 #[tauri::command]
@@ -192,10 +251,13 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .manage(App { eng: eng.clone(), _watch: Mutex::new(None) })
         .invoke_handler(tauri::generate_handler![
-            get_state, plan, apply, pick_folder, undo, correct, route, trash, save_settings
+            get_state, plan, apply, pick_folder, undo, correct, route, trash, save_settings,
+            open_path, reveal, move_to, search, duplicates, trash_files
         ])
         .setup(move |app| {
             // live watcher → UI event per move
@@ -203,6 +265,13 @@ fn main() {
             let w = watch::start(eng.clone(), move |ev| match ev {
                 WatchEvent::Moved(e) => {
                     let _ = handle.emit("transfer://moved", json::entry(&e));
+                    // a Windows notice only when the window isn't on screen
+                    let visible = handle.get_webview_window("main").and_then(|w| w.is_visible().ok()).unwrap_or(false);
+                    if !visible {
+                        let name = e.from.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                        let from = e.from.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                        let _ = handle.notification().builder().title(format!("Moved to {}", e.line.folder())).body(format!("{name} · from {from}")).show();
+                    }
                 }
                 WatchEvent::Failed(msg) => eprintln!("transfer: {msg}"),
             });

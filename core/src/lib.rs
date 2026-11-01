@@ -7,6 +7,7 @@
 //! * the only files written are settings.txt, model.tsv (hashed counts) and
 //!   journal.tsv (the move log that powers undo), all in the local app data folder
 
+pub mod browse;
 pub mod classify;
 pub mod engine;
 pub mod journal;

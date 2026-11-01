@@ -289,6 +289,25 @@ impl Engine {
         self.move_and_log(path, &to, line, 1.0, vec!["you routed this".into()], "correction")
     }
 
+    /// Move any file Transfer can see (loose, or already in a sorted folder)
+    /// into another sorted folder of the same watched folder. Used by drag-to-sort
+    /// and "Move to…". Teaches the model.
+    pub fn move_to(&mut self, path: &Path, line: Line) -> Result<Entry, String> {
+        if line == Line::Holding {
+            return Err("pick a real folder".into());
+        }
+        let src = crate::browse::owner(&self.settings, path).ok_or("that file isn't in a watched folder")?.path.clone();
+        if path.parent() == Some(src.join(line.folder()).as_path()) {
+            return Err(format!("already in {}", line.folder()));
+        }
+        if !path.is_file() && std::fs::symlink_metadata(path).is_err() {
+            return Err("file not found".into());
+        }
+        self.learn_from(path, line);
+        let to = unique_dest(&src, line, path);
+        self.move_and_log(path, &to, line, 1.0, vec!["you moved this".into()], "correction")
+    }
+
     fn learn_from(&mut self, path: &Path, line: Line) {
         if let Ok(f) = signals::extract(path) {
             self.model.learn(&f.model_tokens(), line);
@@ -309,6 +328,20 @@ impl Engine {
             n += 1;
         }
         Ok(n)
+    }
+
+    /// Recycle-bin any files that belong to a watched folder (used by the
+    /// duplicate finder, where you pick exactly which copies go).
+    pub fn trash_watched(&self, paths: &[PathBuf]) -> Result<usize, String> {
+        for p in paths {
+            if crate::browse::owner(&self.settings, p).is_none() || !p.is_file() {
+                return Err(format!("refusing to trash {}", p.display()));
+            }
+        }
+        for p in paths {
+            to_trash(p).map_err(|e| format!("{}: {e}", p.display()))?;
+        }
+        Ok(paths.len())
     }
 
     pub fn stats(&self) -> Stats {

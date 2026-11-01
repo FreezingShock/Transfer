@@ -17,6 +17,8 @@ const P = {
   search: 'M11 18a7 7 0 100-14 7 7 0 000 14zM20 20l-4-4', lock: 'M5 11h14v10H5zM8 11V7a4 4 0 018 0v4',
   chevR: 'M9 6l6 6-6 6', chevD: 'M6 9l6 6 6-6', plus: 'M12 5v14M5 12h14', folder: 'M3 6a2 2 0 012-2h4l2 2h8a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z',
   check: 'M5 12l5 5 9-10', sparkle: 'M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z',
+  open: 'M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5', reveal: 'M3 6a2 2 0 012-2h4l2 2h8a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2zM12 11v5M9.5 13.5L12 16l2.5-2.5',
+  copy: 'M9 9h10v11H9zM5 15V4h10', undo: 'M9 14L4 9l5-5M4 9h10a6 6 0 010 12h-3', dupes: 'M8 8h11v12H8zM5 16V4h11',
 };
 const LINES = [
   { id: 'shortcuts', name: 'Shortcuts', c: '#5aa9ff', d: '#0060df' },
@@ -59,6 +61,12 @@ const api = T ? {
   trash: paths => T.core.invoke('trash', { paths }),
   saveSettings: s => T.core.invoke('save_settings', { settings: s }),
   pickFolder: () => T.core.invoke('pick_folder'),
+  openPath: path => T.core.invoke('open_path', { path }),
+  reveal: path => T.core.invoke('reveal', { path }),
+  moveTo: (path, line) => T.core.invoke('move_to', { path, line }).then(JSON.parse),
+  search: query => T.core.invoke('search', { query }).then(JSON.parse),
+  duplicates: () => T.core.invoke('duplicates').then(JSON.parse),
+  trashFiles: paths => T.core.invoke('trash_files', { paths }),
   on: (ev, cb) => T.event.listen(ev, e => cb(e.payload)),
 } : demoApi();
 
@@ -207,11 +215,19 @@ addEventListener('hashchange', () => {
 });
 async function load(dir) { S = await api.state(); applyTheme(); dir === undefined ? redraw() : go(dir); }
 
-const row = (e, i, enter) => `<div class="row ${enter ? 'enter' : ''} ${fresh.has(e.id) ? 'fresh' : ''}" style="--i:${i}" data-row="${e.id}">
+const row = (e, i, enter) => `<div class="row file ${enter ? 'enter' : ''} ${fresh.has(e.id) ? 'fresh' : ''}" style="--i:${i}" data-row="${e.id}" data-path="${esc(e.undone ? e.from : e.to)}" data-line="${e.line}" ${e.undone ? '' : 'draggable="true"'} title="Click to open · right-click for more">
   ${icon(e.line)}
   <div class="txt"><b title="${esc(e.from)}">${esc(e.name)}</b><span>${esc(base(parts(e.from).slice(0, -1).join('/')))} › ${esc(L(e.line).name)}</span></div>
   <span class="when">${ago(e.ts)}</span>
-  <button class="pill solid undo press" data-undo="${e.id}">Undo</button></div>`;
+  ${e.undone ? '' : `<button class="pill solid undo press" data-undo="${e.id}">Undo</button>`}</div>`;
+
+/* folder tiles: the sorted folders inside a watched folder, with real counts */
+function tilesHtml(s) {
+  const ts = (S.tiles[s.path] || []).filter(t => s.lines.includes(t.line) || t.count);
+  if (!ts.length) return '';
+  return `<div class="tiles">${ts.map((t, i) => `<button class="tile glass press ${t.count ? '' : 'empty-tile'}" style="${lineVars(t.line)};--i:${i}" data-folder="${esc(t.path)}" data-drop="${t.line}"
+    title="Open ${esc(L(t.line).name)} in File Explorer · drop a file here to move it">${icon(t.line, 'sm')}<span class="tn">${L(t.line).name}</span><b>${t.count}</b></button>`).join('')}</div>`;
+}
 
 /* Home */
 function home(el, enter) {
@@ -235,6 +251,7 @@ function home(el, enter) {
     html += `<div class="head"><div style="display:flex;flex-direction:column;gap:2px"><span class="h1">${esc(base(s.path))}</span>
       <span class="sub">${s.mode === 'off' ? 'Not watched' : `${today} sorted today`} · sorts into ${s.lines.length} types</span></div></div>
       <div class="seg glass small" id="modeSeg" role="group" aria-label="Mode">${MODES.map(([m, n]) => `<button class="press" data-mode="${m}" aria-pressed="${s.mode === m}">${n}</button>`).join('')}</div>
+      ${tilesHtml(s)}
       ${waiting ? `<div class="banner">${svg(P.sparkle)}<span><b>${waiting} files</b> are ready to sort here.</span><button class="pill acc press" id="bBanner">Review sweep</button></div>` : ''}`;
   }
   html += recent.length ? `<div class="list">${recent.map((e, i) => row(e, i, enter)).join('')}</div>`
@@ -306,16 +323,13 @@ function history(el, enter) {
   const groups = {};
   rows.forEach(e => { const d = new Date(e.ts * 1e3); const k = d.toDateString() === new Date().toDateString() ? 'Today' : d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }); (groups[k] = groups[k] || []).push(e); });
   let i = 0;
-  el.innerHTML = `<div class="head"><span class="h1">History</span><span class="sub">Tap a move to re-route it</span></div>
+  el.innerHTML = `<div class="head"><span class="h1">History</span><span class="sub">Click to open · right-click for more</span></div>
     <label class="search glass">${svg(P.search)}<input id="q" placeholder="Search moves" aria-label="Search moves" value="${esc(query)}"></label>
     ${Object.entries(groups).map(([k, es]) => `<div class="list"><span class="label" style="padding:4px 6px">${esc(k)}</span>${es.map(e => {
-      const r = row(e, i++, enter).replace('<div class="row', `<div data-move="${e.id}" class="row`).replace('class="row', e.undone ? 'class="row" style="opacity:.45"' : 'class="row');
-      return openMove === e.id ? `<div class="card glass" style="animation:rise .45s var(--spring)">${r}${picker(e.line)}</div>` : r;
+      return row(e, i++, enter).replace('class="row file', e.undone ? 'style="opacity:.45" class="row file' : 'class="row file');
     }).join('')}</div>`).join('') || `<div class="empty">${svg(P.search, 1.6)}<span>No moves match.</span></div>`}`;
   const qi = el.querySelector('#q');
   qi.oninput = () => { query = qi.value; const pos = qi.selectionStart; redraw(); const n = $('q'); n.focus(); n.setSelectionRange(pos, pos); };
-  el.querySelectorAll('[data-move]').forEach(r => r.onclick = ev => { if (ev.target.closest('[data-undo]')) return; openMove = openMove === +r.dataset.move ? null : +r.dataset.move; redraw(); });
-  el.querySelectorAll('[data-line]').forEach(b => b.onclick = async () => { const id = openMove; openMove = null; const e = await api.correct(id, b.dataset.line); fresh.add(e.id); toast(`Moved to ${L(b.dataset.line).name}. Noted for next time.`); load(); });
 }
 
 /* Settings */
@@ -334,6 +348,8 @@ function settings(el) {
         <label class="set"><span class="grow">Wait before moving</span><input type="range" id="settle" min="2" max="60" value="${s.settle_secs}"><output id="settleO">${s.settle_secs} s</output></label>
         <label class="set"><span class="grow">Flag old installers</span><input type="range" id="stale" min="7" max="120" value="${s.stale_installer_days}"><output id="staleO">${s.stale_installer_days} d</output></label>
       </div></div>
+    <div style="display:flex;flex-direction:column;gap:6px"><span class="label">Tidy up</span>
+      <div class="group glass"><button class="set press" id="bDupes">${icon('archives', 'sm').replace(P.archives, P.dupes)}<span class="grow">Find duplicate files</span><span style="color:var(--fg3)">${svg(P.chevR)}</span></button></div></div>
     <div class="group glass"><label class="set"><span class="grow">Open at login</span><input type="checkbox" class="sw" id="login" ${s.launch_at_login ? 'checked' : ''}></label></div>
     <div class="note">${svg(P.lock)}<span>Runs only on this computer. Nothing is uploaded.</span></div>`;
   const save = () => api.saveSettings(s);
@@ -344,6 +360,7 @@ function settings(el) {
   });
   el.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => editFolder(b.dataset.edit));
   el.querySelector('#bAdd2').onclick = addFolder;
+  el.querySelector('#bDupes').onclick = findDupes;
   const rng = (id, set, fmt) => { const i = el.querySelector('#' + id); i.oninput = () => { set(+i.value); el.querySelector('#' + id + 'O').textContent = fmt(+i.value); }; i.onchange = save; };
   rng('conf', v => s.confidence = v / 100, v => v + '%');
   rng('settle', v => s.settle_secs = v, v => v + ' s');
@@ -448,6 +465,112 @@ function toast(msg, undoId) {
   tt = setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 200); }, 3800);
 }
 
+/* ---------- files: open, right-click menu, drag to re-sort ---------- */
+const where = p => { const a = parts(p); const parent = a[a.length - 2] || ''; const line = LINES.find(l => l.name === parent);
+  return line ? `${a[a.length - 3]} › ${line.name}` : parent; };
+async function openFile(path) { try { await api.openPath(path); } catch (e) { toast(String(e)); } }
+$('win').addEventListener('click', ev => {
+  if (ev.target.closest('[data-undo]')) return;
+  const f = ev.target.closest('[data-path]'); if (f && !f.closest('.menu')) { openFile(f.dataset.path); return; }
+  const t = ev.target.closest('[data-folder]'); if (t) openFile(t.dataset.folder);
+});
+function closeMenu() { const m = document.querySelector('.menu'); if (m) { m.classList.add('out'); setTimeout(() => m.remove(), 140); } }
+$('win').addEventListener('contextmenu', ev => {
+  const f = ev.target.closest('[data-path]'); ev.preventDefault(); closeMenu(); if (!f) return;
+  const path = f.dataset.path, undoId = f.querySelector('[data-undo]')?.dataset.undo, cur = f.dataset.line;
+  const m = document.createElement('div'); m.className = 'menu'; m.setAttribute('role', 'menu');
+  m.innerHTML = `<div class="mname">${esc(base(path))}</div>
+    <button class="mi" data-a="open">${svg(P.open)}Open</button>
+    <button class="mi" data-a="reveal">${svg(P.reveal)}Show in folder</button>
+    <button class="mi" data-a="copy">${svg(P.copy)}Copy path</button>
+    ${undoId ? `<button class="mi" data-a="undo">${svg(P.undo)}Undo this move</button>` : ''}
+    <div class="msep"></div><div class="mlabel">Move to</div>
+    <div class="mgrid">${LINES.filter(l => l.id !== cur).map(l => `<button class="mline" data-to="${l.id}" style="${lineVars(l.id)}" title="${l.name}">${svg(P[l.id])}<span>${l.name}</span></button>`).join('')}</div>`;
+  $('win').appendChild(m);
+  const wb = $('win').getBoundingClientRect(), mb = m.getBoundingClientRect();
+  m.style.left = Math.min(ev.clientX - wb.left, wb.width - mb.width - 8) + 'px';
+  m.style.top = Math.min(ev.clientY - wb.top, wb.height - mb.height - 8) + 'px';
+  gel(m);
+  m.onclick = async e => {
+    const b = e.target.closest('button'); if (!b) return; closeMenu();
+    if (b.dataset.a === 'open') openFile(path);
+    if (b.dataset.a === 'reveal') api.reveal(path).catch(x => toast(String(x)));
+    if (b.dataset.a === 'copy') { try { await navigator.clipboard.writeText(path); toast('Path copied'); } catch { toast(path); } }
+    if (b.dataset.a === 'undo') { const r = await api.undo(+undoId); toast(`Put ${r.name} back`); load(); }
+    if (b.dataset.to) moveFile(path, b.dataset.to);
+  };
+});
+addEventListener('pointerdown', e => { if (!e.target.closest('.menu')) closeMenu(); }, true);
+addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
+$('view').addEventListener('scroll', closeMenu, true);
+async function moveFile(path, line) {
+  try { const e = await api.moveTo(path, line); fresh.add(e.id); toast(`${e.name} › ${L(line).name}. Noted for next time.`, e.id); load(); }
+  catch (x) { toast(String(x)); }
+}
+// drag a file row onto a folder tile
+$('win').addEventListener('dragstart', e => {
+  const f = e.target.closest('[data-path]'); if (!f) return;
+  e.dataTransfer.setData('text/x-transfer', f.dataset.path); e.dataTransfer.effectAllowed = 'move';
+  f.classList.add('dragging'); document.body.classList.add('is-dragging');
+});
+$('win').addEventListener('dragend', e => { e.target.closest?.('[data-path]')?.classList.remove('dragging'); document.body.classList.remove('is-dragging'); });
+$('win').addEventListener('dragover', e => { const t = e.target.closest('[data-drop]'); if (!t) return; e.preventDefault(); t.classList.add('over'); });
+$('win').addEventListener('dragleave', e => { const t = e.target.closest('[data-drop]'); if (t && !t.contains(e.relatedTarget)) t.classList.remove('over'); });
+$('win').addEventListener('drop', e => {
+  const t = e.target.closest('[data-drop]'); if (!t) return; e.preventDefault(); t.classList.remove('over');
+  const path = e.dataTransfer.getData('text/x-transfer'); if (path) moveFile(path, t.dataset.drop);
+});
+
+/* ---------- search everything ---------- */
+function openSearch() {
+  sheet(`<div class="search glass" style="height:42px">${svg(P.search)}<input id="sq" placeholder="Search every watched folder" aria-label="Search files" autocomplete="off"></div>
+    <div class="scroll" id="sres"><div class="empty">${svg(P.search, 1.6)}<span>Type part of a file name. Click a result to open it.</span></div></div>`, sh => {
+    const q = sh.querySelector('#sq'); setTimeout(() => q.focus(), 60);
+    let tmr;
+    q.oninput = () => { clearTimeout(tmr); tmr = setTimeout(async () => {
+      const v = q.value.trim(), out = sh.querySelector('#sres');
+      if (!v) { out.innerHTML = ''; return; }
+      const hits = await api.search(v);
+      out.innerHTML = hits.length ? `<div class="list">${hits.map((f, i) => `<div class="row file enter" style="--i:${Math.min(i, 10)}" data-path="${esc(f.path)}" data-line="${f.line || ''}" draggable="true" title="Click to open · right-click for more">
+          ${icon(f.line || 'holding')}<div class="txt"><b>${esc(f.name)}</b><span>${esc(where(f.path))} · ${size(f.size)}</span></div><span class="when">${ago(f.modified)}</span></div>`).join('')}</div>`
+        : `<div class="empty">${svg(P.search, 1.6)}<span>No files named like "${esc(v)}".</span></div>`;
+    }, 140); };
+  });
+}
+$('bSearch').onclick = openSearch;
+addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); openSearch(); } });
+
+/* ---------- duplicates ---------- */
+async function findDupes() {
+  sheet(`<div style="display:flex;flex-direction:column;gap:2px;padding:0 4px"><span class="h1">Duplicates</span><span class="sub" id="dsub">Comparing files byte by byte…</span></div>
+    <div class="scroll" id="dres"><div class="empty"><span class="spin" aria-hidden="true"></span></div></div>
+    <div style="display:flex;gap:8px"><button class="btn ghost press" style="flex:1" data-close>Close</button><button class="btn acc press" style="flex:1.6" id="dGo" disabled>Pick copies to remove</button></div>`, async sh => {
+    const groups = await api.duplicates();
+    const out = sh.querySelector('#dres'), go = sh.querySelector('#dGo'), sub = sh.querySelector('#dsub');
+    if (!groups.length) { sub.textContent = 'No exact copies found.'; out.innerHTML = `<div class="empty">${svg(P.check, 1.6)}<span>Every file is unique.</span></div>`; return; }
+    const waste = groups.reduce((a, g) => a + g[0].size * (g.length - 1), 0);
+    sub.textContent = `${groups.length} set${groups.length > 1 ? 's' : ''} of identical files · ${size(waste)} could be freed. The newest copy is kept unless you change it.`;
+    out.innerHTML = groups.map((g, gi) => `<div class="group glass">${g.map((f, i) => `<label class="set dup">
+        <input type="checkbox" class="ck" data-p="${esc(f.path)}" ${i ? 'checked' : ''} aria-label="Remove ${esc(f.name)}">
+        ${icon(f.line || 'holding', 'sm')}<span class="grow txt"><b>${esc(f.name)}</b><span>${esc(where(f.path))} · ${ago(f.modified)}${i ? '' : ' · newest'}</span></span><span class="val">${size(f.size)}</span></label>`).join('')}</div>`).join('');
+    const sync = () => {
+      const picked = [...out.querySelectorAll('.ck:checked')];
+      // never let a whole set be removed
+      out.querySelectorAll('.group').forEach(gEl => { const cks = [...gEl.querySelectorAll('.ck')]; if (cks.every(c => c.checked)) cks[0].checked = false; });
+      const n = out.querySelectorAll('.ck:checked').length;
+      go.disabled = !n; go.textContent = n ? `Move ${n} to Recycle Bin` : 'Pick copies to remove';
+      return picked;
+    };
+    out.onchange = sync; sync();
+    go.onclick = async () => {
+      const paths = [...out.querySelectorAll('.ck:checked')].map(c => c.dataset.p);
+      go.disabled = true;
+      try { await api.trashFiles(paths); closeSheet(); toast(`Moved ${paths.length} duplicate${paths.length > 1 ? 's' : ''} to the Recycle Bin`); load(); }
+      catch (x) { toast(String(x)); go.disabled = false; }
+    };
+  });
+}
+
 /* window controls */
 const W = T && T.window && T.window.getCurrentWindow ? T.window.getCurrentWindow() : null;
 let onTop = false;
@@ -495,6 +618,17 @@ function demoApi() {
     ['Desktop', 'untitled', 'images'], ['Desktop', 'ideas.txt', 'docs'], ['Documents', 'Spanish vocab unit 4.txt', 'docs'], ['Documents', 'renovated_render.png', 'images'], ['Documents', 'track_pr_tracker.csv', 'docs'], ['Documents', 'infill_grid.py', 'code']]
     .map(([s, n, l]) => ({ name: n, from: H + s + '/' + n, line: l, confidence: .9, reasons: [], size: 1000 }));
   const R = x => Promise.resolve(JSON.parse(JSON.stringify(x)));
+  // what's already in each sorted folder (Shortcuts, Installers, Videos, Images, Audio, Docs, Archives, Code)
+  const BASE = { Desktop: [39, 0, 2, 11, 0, 4, 1, 3], Downloads: [0, 84, 144, 63, 20, 16, 20, 19], Documents: [3, 0, 0, 6, 0, 41, 2, 7] };
+  const EXTRA = [['xc_meet_finish.mp4', 'Downloads', 'videos', 3], ['IMG_4380.MOV', 'Downloads', 'videos', 6], ['DiscordSetup.exe', 'Downloads', 'installers', 60],
+    ['Infill parcels v2.pdf', 'Documents', 'docs', 9], ['IMG_2201.HEIC', 'Desktop', 'images', 14], ['cover_art_final.png', 'Downloads', 'images', 21]];
+  let dupes = [
+    [{ name: 'IMG_4417.MOV', path: H + 'Downloads/Videos/IMG_4417.MOV', size: 412e6, modified: now - 60, line: 'videos' },
+     { name: 'IMG_4417 (2).MOV', path: H + 'Downloads/Videos/IMG_4417 (2).MOV', size: 412e6, modified: now - 86400 * 3, line: 'videos' }],
+    [{ name: 'APBio_Lab7_rubric.pdf', path: H + 'Downloads/Docs/APBio_Lab7_rubric.pdf', size: 1.2e6, modified: now - 1300, line: 'docs' },
+     { name: 'APBio_Lab7_rubric.pdf', path: H + 'Documents/Docs/APBio_Lab7_rubric.pdf', size: 1.2e6, modified: now - 86400 * 2, line: 'docs' },
+     { name: 'APBio_Lab7_rubric (1).pdf', path: H + 'Downloads/APBio_Lab7_rubric (1).pdf', size: 1.2e6, modified: now - 86400 * 4, line: null }],
+  ];
   const scoped = src => pend.filter(m => {
     const s = settings.sources.find(x => within(m.from, x.path));
     return s && s.mode !== 'off' && s.lines.includes(m.line) && (!src || within(m.from, src));
@@ -505,8 +639,29 @@ function demoApi() {
   const api = {
     state: () => {
       const pending = {}; settings.sources.forEach(s => pending[s.path] = scoped(s.path).length);
-      return R({ stats: {}, history: hist, settings, held, stale, pending });
+      const tiles = {};
+      settings.sources.forEach((s, si) => tiles[s.path] = LINES.map((l, li) => {
+        const moved = hist.filter(e => !e.undone && within(e.to, s.path + '/' + l.name)).length;
+        const base0 = BASE[base(s.path)] ? BASE[base(s.path)][li] : 0;
+        return { line: l.id, path: s.path + '/' + l.name, count: base0 + moved, bytes: 0, exists: base0 + moved > 0 };
+      }));
+      return R({ stats: {}, history: hist, settings, held, stale, pending, tiles });
     },
+    openPath: p => { toast(`Opens ${base(p)}${/\.[a-z0-9]+$/i.test(p) ? ' with its app' : ' in File Explorer'}`); return R(null); },
+    reveal: p => { toast(`Shows ${base(p)} in File Explorer`); return R(null); },
+    moveTo: (path, line) => {
+      const e = hist.find(x => !x.undone && x.to === path); if (e) e.undone = true;
+      const src = settings.sources.find(s => within(path, s.path));
+      return R(mv(base(src.path), base(path), line, 0, 'correction'));
+    },
+    search: q => {
+      const w = q.toLowerCase().split(/\s+/).filter(Boolean);
+      const all = [...hist.filter(e => !e.undone).map(e => ({ name: e.name, path: e.to, size: 3.2e6, modified: e.ts, line: e.line })),
+        ...EXTRA.map(([n, s, l, d]) => ({ name: n, path: H + s + '/' + L(l).name + '/' + n, size: 1.4e6 * (n.length % 7 + 1), modified: now - d * 86400, line: l }))];
+      return R(all.filter(f => w.every(x => f.name.toLowerCase().includes(x))).slice(0, 60));
+    },
+    duplicates: () => new Promise(r => setTimeout(() => r(JSON.parse(JSON.stringify(dupes))), 700)),
+    trashFiles: paths => { dupes = dupes.map(g => g.filter(f => !paths.includes(f.path))).filter(g => g.length > 1); return R(paths.length); },
     plan: src => R([{ source: src || H, moves: scoped(src), held: [], stale: [] }]),
     apply: src => { const m = scoped(src); pend = pend.filter(x => !m.includes(x)); return R(m.map(x => mv(parts(x.from).slice(-2)[0], x.name, x.line, 0, 'sweep'))); },
     undo: i => { const e = hist.find(x => x.id === i); e.undone = true; return R(e); },

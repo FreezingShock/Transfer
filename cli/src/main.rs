@@ -9,6 +9,9 @@
 //!   transfer route PATH LINE      resolve a held file
 //!   transfer explain FILE         show the signals for one file
 //!   transfer state                full UI state as JSON
+//!   transfer search WORDS         find files by name across watched folders
+//!   transfer dupes                exact duplicate groups
+//!   transfer move PATH LINE       move any watched file into a sorted folder
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -103,6 +106,15 @@ fn main() {
             }
         }
         "state" => println!("{}", transfer_core::json::state(&eng)),
+        "search" => println!("{}", transfer_core::json::files(&transfer_core::browse::search(&eng.settings, &rest.join(" "), 50))),
+        "dupes" => println!("{}", transfer_core::json::duplicates(&transfer_core::browse::duplicates(&eng.settings))),
+        "move" => {
+            let (a, l) = (rest.first().expect("PATH"), rest.get(1).expect("LINE"));
+            match eng.move_to(&PathBuf::from(a), Line::parse(l).expect("line")) {
+                Ok(e) => println!("→ {}", e.to.display()),
+                Err(m) => eprintln!("{m}"),
+            }
+        }
         "explain" => {
             for p in rest {
                 let f = signals::extract(&PathBuf::from(p)).expect("read file");
@@ -111,7 +123,7 @@ fn main() {
                 println!("  → {:?} ({}%) guess={:?}\n    {}", v.line, (v.confidence * 100.0) as u32, v.guess, v.reasons.join("\n    "));
             }
         }
-        _ => println!("{}", include_str!("main.rs").lines().skip(2).take(10).map(|l| &l[4.min(l.len())..]).collect::<Vec<_>>().join("\n")),
+        _ => println!("{}", include_str!("main.rs").lines().skip(2).take(13).map(|l| &l[4.min(l.len())..]).collect::<Vec<_>>().join("\n")),
     }
 }
 

@@ -155,16 +155,54 @@ pub fn state(e: &crate::engine::Engine) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        r#"{{"stats":{},"history":{},"settings":{},"held":{},"stale":{},"lines":{},"pending":{{{}}}}}"#,
+        r#"{{"stats":{},"history":{},"settings":{},"held":{},"stale":{},"lines":{},"pending":{{{}}},"tiles":{{{}}}}}"#,
         stats(&e.stats()),
         entries(&e.journal.recent(500)),
         settings(&e.settings),
         arr(&held, held_one),
         arr(&stale_v, stale),
         lines(),
-        pending
+        pending,
+        e.settings
+            .sources
+            .iter()
+            .map(|src| format!("{}:{}", p(&src.path), tiles(&crate::browse::tiles(&src.path))))
+            .collect::<Vec<_>>()
+            .join(",")
     )
 }
 fn held_one(h: &Held) -> String {
     held(h)
+}
+
+pub fn file(f: &crate::browse::FileInfo) -> String {
+    format!(
+        r#"{{"name":{},"path":{},"size":{},"modified":{},"line":{}}}"#,
+        name(&f.path),
+        p(&f.path),
+        f.size,
+        f.modified,
+        f.line.map(|l| s(l.id())).unwrap_or_else(|| "null".into())
+    )
+}
+
+pub fn files(v: &[crate::browse::FileInfo]) -> String {
+    arr(v, file)
+}
+
+pub fn duplicates(groups: &[Vec<crate::browse::FileInfo>]) -> String {
+    arr(groups, |g| files(g))
+}
+
+pub fn tiles(v: &[crate::browse::Tile]) -> String {
+    arr(v, |t| {
+        format!(
+            r#"{{"line":{},"path":{},"count":{},"bytes":{},"exists":{}}}"#,
+            s(t.line.id()),
+            p(&t.path),
+            t.count,
+            t.bytes,
+            t.exists
+        )
+    })
 }
