@@ -80,25 +80,79 @@ function applyTheme() {
 }
 mq.addEventListener('change', applyTheme);
 
-/* ---------- liquid indicator ---------- */
+/* ---------- liquid motion ----------
+   Modeled on Liquid Glass: damped springs (no wobble), a selection "lens" whose
+   leading edge is stiffer than its trailing edge so it stretches toward where
+   it's going, and thins while stretched so its area stays the same. */
+const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+class Spring {
+  constructor(x, k, z) { this.x = x; this.v = 0; this.to = x; this.set(k, z); }
+  set(k, z) { this.k = k; this.c = 2 * z * Math.sqrt(k); }
+  step(dt) { const a = -this.k * (this.x - this.to) - this.c * this.v; this.v += a * dt; this.x += this.v * dt; }
+  get done() { return Math.abs(this.x - this.to) < 0.15 && Math.abs(this.v) < 1; }
+}
+const LEAD = [900, 0.82], TRAIL = [380, 0.92], SETTLE = [700, 0.9];
 function moveInd(nav, target, animate = true) {
   let ind = nav.querySelector('.ind');
   if (!ind) { ind = document.createElement('span'); ind.className = 'ind'; nav.prepend(ind); }
-  if (!target) { ind.style.width = '0'; return; }
+  if (!target) { ind.style.width = '0'; ind._L = null; return; }
   const nb = nav.getBoundingClientRect(), tb = target.getBoundingClientRect();
-  const left = tb.left - nb.left + nav.scrollLeft, width = tb.width;
-  if (!animate || !ind.style.width || ind.style.width === '0px') {
-    ind.style.transition = 'none'; ind.style.left = left + 'px'; ind.style.width = width + 'px';
-    ind.offsetWidth; ind.style.transition = ''; return;
+  const left = tb.left - nb.left + nav.scrollLeft, right = left + tb.width;
+  if (!ind._L || !animate || reduce.matches) {
+    ind._L = new Spring(left, ...SETTLE); ind._R = new Spring(right, ...SETTLE); ind._w = tb.width;
+    ind.style.left = left + 'px'; ind.style.width = tb.width + 'px'; ind.style.transform = ''; return;
   }
-  // droplet: stretch across the gap first, then settle onto the target
-  const oldL = parseFloat(ind.style.left), oldR = oldL + parseFloat(ind.style.width);
-  const uL = Math.min(oldL, left), uR = Math.max(oldR, left + width);
-  ind.classList.add('squash');
-  ind.style.transition = 'left .14s ease-out,width .14s ease-out,transform .3s var(--bounce)';
-  ind.style.left = uL + 'px'; ind.style.width = (uR - uL) + 'px';
-  clearTimeout(ind._t);
-  ind._t = setTimeout(() => { ind.style.transition = ''; ind.style.left = left + 'px'; ind.style.width = width + 'px'; ind.classList.remove('squash'); }, 130);
+  const goingRight = left > ind._L.to;
+  (goingRight ? ind._R : ind._L).set(...LEAD);
+  (goingRight ? ind._L : ind._R).set(...TRAIL);
+  ind._L.to = left; ind._R.to = right; ind._w = tb.width;
+  if (ind._raf) return;
+  let last = performance.now();
+  const tick = now => {
+    let dt = Math.min(0.032, (now - last) / 1000); last = now;
+    for (let i = 0; i < 4; i++) { ind._L.step(dt / 4); ind._R.step(dt / 4); }
+    const w = Math.max(8, ind._R.x - ind._L.x);
+    const stretch = Math.min(1.6, w / ind._w);
+    // volume-preserving: wider -> thinner (sqrt keeps it subtle)
+    const sy = stretch > 1 ? Math.max(0.82, 1 / Math.sqrt(stretch)) : 1;
+    ind.style.left = ind._L.x + 'px'; ind.style.width = w + 'px'; ind.style.transform = `scaleY(${sy.toFixed(3)})`;
+    if (ind._L.done && ind._R.done) { ind._raf = 0; ind.style.left = ind._L.to + 'px'; ind.style.width = (ind._R.to - ind._L.to) + 'px'; ind.style.transform = ''; return; }
+    ind._raf = requestAnimationFrame(tick);
+  };
+  ind._raf = requestAnimationFrame(tick);
+}
+
+/* glass swells a few px under the finger and lights up where it's touched */
+addEventListener('pointerdown', e => {
+  const el = e.target.closest('.press'); if (!el || el.disabled) return;
+  const r = el.getBoundingClientRect();
+  el.style.setProperty('--mx', (e.clientX - r.left) + 'px'); el.style.setProperty('--my', (e.clientY - r.top) + 'px');
+  const grow = Math.min(1.08, (r.width + 8) / r.width);
+  el.classList.add('down'); if (!reduce.matches) el.style.transform = `scale(${grow.toFixed(3)})`;
+  const up = () => { el.classList.remove('down'); el.style.transform = ''; removeEventListener('pointerup', up); removeEventListener('pointercancel', up); };
+  addEventListener('pointerup', up); addEventListener('pointercancel', up);
+});
+addEventListener('pointermove', e => {
+  const el = e.target.closest('.press.down'); if (!el) return;
+  const r = el.getBoundingClientRect();
+  el.style.setProperty('--mx', (e.clientX - r.left) + 'px'); el.style.setProperty('--my', (e.clientY - r.top) + 'px');
+});
+
+/* gel: a small droplet arrives with each axis on its own spring, so it squeezes then settles */
+function gel(el) {
+  if (reduce.matches) return;
+  const sx = new Spring(0.86, 520, 0.6), sy = new Spring(0.6, 380, 0.78), y = new Spring(18, 420, 1);
+  sx.to = sy.to = 1; y.to = 0;
+  let last = performance.now(), o = 0;
+  const tick = now => {
+    const dt = Math.min(0.032, (now - last) / 1000); last = now;
+    for (let i = 0; i < 4; i++) { sx.step(dt / 4); sy.step(dt / 4); y.step(dt / 4); }
+    o = Math.min(1, o + dt * 7);
+    el.style.opacity = o; el.style.transform = `translateY(${y.x.toFixed(2)}px) scale(${sx.x.toFixed(3)},${sy.x.toFixed(3)})`;
+    if (sx.done && sy.done && y.done && o >= 1) { el.style.transform = ''; return; }
+    requestAnimationFrame(tick);
+  };
+  el.style.opacity = 0; requestAnimationFrame(tick);
 }
 
 /* ---------- chrome ---------- */
@@ -106,28 +160,32 @@ function chrome(animateInd = true) {
   const win = $('win');
   win.style.setProperty('--acc', folder && src() ? colorOf(src()) : '#8e8cf5');
   // folders bar
+  const s0 = src();
+  $('bSweep').hidden = !(cur() === 'home' && !(s0 && s0.mode === 'off'));
   const f = $('folders');
   const hideBar = cur() === 'settings';
   f.classList.toggle('hidden', hideBar); f.toggleAttribute('inert', hideBar); f.setAttribute('aria-hidden', hideBar);
+  const fInd = f.querySelector('.ind');
   f.innerHTML = `<button class="press" data-f="" ${!folder ? 'aria-pressed="true"' : 'aria-pressed="false"'}>All</button>` +
     sources().map(s => `<button class="press" data-f="${esc(s.path)}" aria-pressed="${s.path === folder}" style="--c:${colorOf(s)}" title="${esc(s.path)}">
       <span class="dot" style="opacity:${s.mode === 'off' ? .35 : 1}"></span>${esc(base(s.path))}</button>`).join('') +
     `<button class="add press" id="bAdd" aria-label="Add a folder">${svg(P.plus)}</button>`;
+  if (fInd) f.prepend(fInd);
   moveInd(f, f.querySelector('[aria-pressed=true]'), animateInd);
   f.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { if ((b.dataset.f || null) === folder) return; folder = b.dataset.f || null; openHeld = 0; trashAsk = false; go('f'); });
   $('bAdd').onclick = addFolder;
   // tabs
   const held = S.held.filter(h => inScope(h.path)).length;
   const t = $('tabs');
+  const tInd = t.querySelector('.ind');
   t.innerHTML = TABS.map(([id, label]) => `<a class="press" href="#${id}" aria-label="${label}${id === 'review' && held ? `, ${held} waiting` : ''}" ${cur() === id ? 'aria-current="page"' : ''}>${svg(P[id], 1.8)}${id === 'review' && held ? `<span class="badge">${held}</span>` : ''}</a>`).join('');
+  if (tInd) t.prepend(tInd);
   moveInd(t, t.querySelector('[aria-current=page]'), animateInd);
   // live chip
   const p = S.settings.paused;
   $('bLive').className = 'glass live press' + (p ? ' off' : '');
   $('bLive').querySelector('span').textContent = p ? 'Paused' : 'Live';
   $('bLive').setAttribute('aria-label', p ? 'Resume sorting' : 'Pause sorting');
-  const s = src();
-  $('bSweep').style.visibility = cur() === 'home' && !(s && s.mode === 'off') ? '' : 'hidden';
 }
 
 /* ---------- screens ---------- */
@@ -384,7 +442,7 @@ function toast(msg, undoId) {
   const old = document.querySelector('.toast'); if (old) old.remove(); clearTimeout(tt);
   const t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status');
   t.innerHTML = `<span>${esc(msg)}</span>${undoId ? '<button class="press">Undo</button>' : ''}`;
-  $('win').appendChild(t);
+  $('win').appendChild(t); gel(t);
   if (undoId) t.querySelector('button').onclick = async () => { await api.undo(undoId); t.remove(); load(); };
   tt = setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 200); }, 3800);
 }

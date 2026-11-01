@@ -9,8 +9,11 @@
    Motion: spring + bounce curves; everything settles in under ~420ms. */
 :root{
   --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
-  --spring:linear(0,.009,.035 2.1%,.141,.281 6.7%,.723 12.9%,.938 16.7%,1.017,1.077,1.121 24%,1.149 27.1%,1.159 31.1%,1.142 35.8%,1.105,1.07 44.7%,1.016 51.5%,.994 57.2%,.989 63.6%,.996 75.6%,1.002 87.4%,1);
-  --bounce:linear(0,.063,.25 7.5%,.563,1 15%,1.187 20%,1.25 25%,1.187 30%,1 35%,.937 40%,.92 45%,.937 50%,1 60%,1.02 70%,1 85%,1);
+  /* springs sampled from Apple-style params: snappy = damping .85 / stiffness 900 (presses, selection),
+     smooth = critically damped (sheets, screens), gel = damping .72 (small droplets) */
+  --snappy:linear(0,.073,.219,.382,.553,.68,.78,.855,.909,.95,.974,.988,.997,1.001,1.003,1.004,1.004,1.003,1.003,1.002,1.001,1.001,1.001,1,1);
+  --smooth:linear(0,.077,.213,.372,.516,.636,.724,.798,.854,.893,.923,.946,.96,.972,.98,.986,.99,.993,.995,.997,.998,.998,.999,.999,1);
+  --gel:linear(0,.088,.268,.486,.665,.807,.909,.975,1.015,1.031,1.035,1.032,1.025,1.018,1.012,1.007,1.003,1.001,.999,.999,.999,.999,.999,.999,1);
   --out:cubic-bezier(.22,1,.36,1);
   --acc:#8e8cf5;
   /* dark (default) */
@@ -48,9 +51,13 @@ svg{width:16px;height:16px;flex:none}
   border:1px solid var(--edge);box-shadow:inset 0 1px 0 var(--hi),var(--shadow);overflow:hidden;transition:background-color .4s}
 .native .win{width:100%;height:100%;border-radius:0;border:0;-webkit-backdrop-filter:none;backdrop-filter:none;box-shadow:inset 0 1px 0 var(--hi)}
 
-/* press squish on anything tappable */
-.press{transition:transform .42s var(--bounce),background-color .2s,box-shadow .2s,color .2s}
-.press:active{transform:scale(.92);transition:transform .09s ease-out}
+/* press: like Liquid Glass, controls swell slightly and light up under the finger (JS sets the scale) */
+.press{position:relative;transition:transform .33s var(--snappy),background-color .2s,box-shadow .2s,color .2s}
+.press.down{transition:transform .18s var(--snappy)}
+.press::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity .35s ease;
+  background:radial-gradient(90px circle at var(--mx,50%) var(--my,50%),rgba(255,255,255,.28),transparent 65%)}
+.press.down::after{opacity:1;transition:opacity .08s}
+[data-theme=light] .press::after{background:radial-gradient(90px circle at var(--mx,50%) var(--my,50%),rgba(255,255,255,.75),transparent 65%)}
 
 .top{display:flex;align-items:center;gap:8px;min-height:26px}
 .lights{display:flex;gap:7px}
@@ -70,9 +77,8 @@ svg{width:16px;height:16px;flex:none}
 .seg>button,.seg>a{position:relative;z-index:1;flex:1;min-width:0;height:32px;border-radius:13px;display:flex;align-items:center;justify-content:center;gap:6px;
   color:var(--fg2);font-size:12.5px;font-weight:600;text-decoration:none;white-space:nowrap;transition:color .25s}
 .seg>[aria-current=page],.seg>[aria-pressed=true]{color:var(--fg)}
-.seg .ind{position:absolute;z-index:0;top:3px;bottom:3px;left:0;width:0;border-radius:13px;background:var(--s3);
-  box-shadow:inset 0 1px 0 var(--hi),0 2px 8px rgba(0,0,0,.12);transition:left .42s var(--spring),width .42s var(--spring),transform .3s var(--bounce)}
-.seg .ind.squash{transform:scaleY(.82)}
+.seg .ind{position:absolute;z-index:0;top:3px;bottom:3px;left:0;width:0;border-radius:13px;background:var(--s3);will-change:left,width,transform;
+  box-shadow:inset 0 1px 0 var(--hi),0 2px 8px rgba(0,0,0,.12)}
 .seg.small>button{height:26px;font-size:12px}
 .folders{overflow-x:auto;scrollbar-width:none;flex:none;max-height:44px;transition:max-height .38s var(--out),opacity .22s ease,margin .38s var(--out),padding .38s var(--out),border-width .38s}
 .folders.hidden{max-height:0;opacity:0;margin-top:-12px;padding-top:0;padding-bottom:0;border-width:0;pointer-events:none}
@@ -84,11 +90,11 @@ svg{width:16px;height:16px;flex:none}
 .view{flex:1;min-height:0;position:relative}
 .screen{position:absolute;inset:0;display:flex;flex-direction:column;gap:12px;overflow-y:auto;scrollbar-width:none}
 .screen::-webkit-scrollbar{display:none}
-.screen.in-r{animation:inR .42s var(--spring)}
-.screen.in-l{animation:inL .42s var(--spring)}
+.screen.in-r{animation:inR .45s var(--smooth)}
+.screen.in-l{animation:inL .45s var(--smooth)}
 .screen.in-f{animation:inF .32s var(--out)}
-@keyframes inR{from{opacity:0;transform:translateX(18px) scale(.985)}}
-@keyframes inL{from{opacity:0;transform:translateX(-18px) scale(.985)}}
+@keyframes inR{from{opacity:0;transform:translateX(14px)}}
+@keyframes inL{from{opacity:0;transform:translateX(-14px)}}
 @keyframes inF{from{opacity:0;transform:translateY(6px)}}
 
 .h1{font-size:22px;font-weight:650;letter-spacing:-.3px}
@@ -109,8 +115,8 @@ svg{width:16px;height:16px;flex:none}
 .list{display:flex;flex-direction:column}
 .row{display:flex;align-items:center;gap:11px;padding:8px 6px;border-radius:13px;text-align:left;width:100%;transition:background-color .15s,height .3s var(--out),opacity .25s,padding .3s}
 .row:hover{background:var(--s1)}
-.row.enter{animation:drop .5s var(--spring) both;animation-delay:calc(var(--i,0) * 35ms)}
-@keyframes drop{from{opacity:0;transform:translateY(-10px) scale(.97)}}
+.row.enter{animation:drop .45s var(--smooth) both;animation-delay:calc(var(--i,0) * 28ms)}
+@keyframes drop{from{opacity:0;transform:translateY(-6px)}}
 .row.fresh{animation:fresh 1.4s var(--out)}
 @keyframes fresh{from{background:color-mix(in srgb,var(--acc) 30%,transparent)}}
 .row.gone{height:0!important;opacity:0;padding-top:0;padding-bottom:0;overflow:hidden}
@@ -124,9 +130,9 @@ svg{width:16px;height:16px;flex:none}
 .txt span{font-size:11.5px;color:var(--fg2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .when{font-size:11.5px;color:var(--fg2);font-variant-numeric:tabular-nums;white-space:nowrap}
 .row .undo{display:none}
-.row:hover .undo,.row:focus-within .undo{display:inline-flex;animation:pop .35s var(--bounce)}
+.row:hover .undo,.row:focus-within .undo{display:inline-flex;animation:pop .4s var(--gel)}
 .row:hover .when,.row:focus-within .when{display:none}
-@keyframes pop{from{transform:scale(.6);opacity:0}}
+@keyframes pop{from{transform:scale(.8,.6);opacity:0}}
 
 .pill{height:26px;padding:0 11px;border-radius:13px;font-size:12px;font-weight:650;align-items:center;justify-content:center;display:inline-flex}
 .solid{background:var(--solid);color:var(--solid-ink)}
@@ -143,8 +149,8 @@ svg{width:16px;height:16px;flex:none}
 input[type=range]{accent-color:var(--acc);width:120px}
 .sw{appearance:none;-webkit-appearance:none;margin:0;width:42px;height:24px;border-radius:12px;background:var(--s3);position:relative;cursor:pointer;flex:none;transition:background-color .25s;box-shadow:inset 0 0 0 1px var(--edge)}
 .sw::after{content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:10px;background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.25);
-  transition:left .42s var(--spring),width .25s var(--out)}
-.sw:active::after{width:26px}
+  transition:left .33s var(--snappy),width .22s var(--snappy),height .22s var(--snappy),top .22s var(--snappy)}
+.sw:active::after{width:26px;height:18px;top:3px}
 .sw:checked{background:#30d158}
 .sw:checked::after{left:20px}
 .sw:checked:active::after{left:14px}
@@ -169,8 +175,9 @@ input[type=range]{accent-color:var(--acc);width:120px}
 
 .foot{display:flex;align-items:center;gap:8px}
 .foot .seg{flex:1}
+#bSweep[hidden]{display:none}
 .foot .seg a svg{width:17px;height:17px}
-.badge{position:absolute;top:2px;left:calc(50% + 5px);min-width:16px;height:16px;border-radius:8px;background:#ff453a;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px;animation:pop .4s var(--bounce)}
+.badge{position:absolute;top:2px;left:calc(50% + 5px);min-width:16px;height:16px;border-radius:8px;background:#ff453a;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px;animation:pop .45s var(--gel)}
 .note{display:flex;align-items:center;gap:8px;padding:2px 6px;font-size:12px;color:var(--fg2)}
 .note svg{width:14px;height:14px}
 .empty{padding:30px 16px;text-align:center;color:var(--fg2);font-size:12.5px;display:flex;flex-direction:column;align-items:center;gap:8px}
@@ -179,12 +186,12 @@ input[type=range]{accent-color:var(--acc);width:120px}
 .scrim{position:absolute;inset:0;z-index:5;background:rgba(0,0,0,.18);animation:fadeIn .25s ease both}
 .sheet{position:absolute;left:8px;right:8px;bottom:8px;max-height:calc(100% - 40px);z-index:6;display:flex;flex-direction:column;gap:14px;padding:16px 14px 14px;border-radius:24px;
   background:var(--tint);-webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);border:1px solid var(--edge);box-shadow:inset 0 1px 0 var(--hi),0 -10px 40px rgba(0,0,0,.25);
-  animation:rise .55s var(--spring) both;transform-origin:50% 100%}
+  animation:rise .5s var(--smooth) both;transform-origin:50% 100%}
 [data-theme=dark] .sheet{background:rgba(20,22,40,.92)}
 [data-theme=light] .sheet{background:rgba(250,250,255,.94)}
 .sheet.out{animation:sink .22s ease-in both}
 .scrim.out{animation:fadeOut .22s ease-in both}
-@keyframes rise{0%{transform:translateY(40px) scaleY(.94);opacity:0}55%{transform:translateY(-3px) scaleY(1.015);opacity:1}100%{transform:none}}
+@keyframes rise{from{transform:translateY(36px);opacity:0}}
 @keyframes sink{to{transform:translateY(30px) scale(.98);opacity:0}}
 @keyframes fadeIn{from{opacity:0}}@keyframes fadeOut{to{opacity:0}}
 .sheet .scroll{overflow-y:auto;scrollbar-width:none;display:flex;flex-direction:column;gap:12px;min-height:0}
@@ -192,9 +199,8 @@ input[type=range]{accent-color:var(--acc);width:120px}
 .path{font:11.5px ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 .toast{position:absolute;left:14px;right:14px;bottom:64px;z-index:7;display:flex;align-items:center;gap:10px;padding:10px 10px 10px 14px;border-radius:18px;font-size:12.5px;font-weight:550;
-  background:var(--solid);color:var(--solid-ink);box-shadow:0 12px 30px rgba(0,0,0,.3);animation:toastIn .5s var(--bounce) both}
+  background:var(--solid);color:var(--solid-ink);box-shadow:0 12px 30px rgba(0,0,0,.3);transform-origin:50% 100%}
 .toast.out{animation:sink .2s ease-in both}
-@keyframes toastIn{0%{transform:translateY(20px) scale(.8,.6);opacity:0}60%{transform:translateY(-2px) scale(1.03,.97);opacity:1}100%{transform:none}}
 .toast span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .toast button{height:26px;padding:0 11px;border-radius:13px;font-size:12px;font-weight:650;background:color-mix(in srgb,var(--solid-ink) 14%,transparent)}
 

@@ -1,7 +1,7 @@
 {
   "name": "transfer",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Automatic, on-device sorting for Desktop, Downloads and Documents",
   "scripts": {
     "dev": "tauri dev",
