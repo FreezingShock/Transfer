@@ -4519,6 +4519,7 @@ name = "transfer-app"
 version = "0.4.3"
 dependencies = [
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
