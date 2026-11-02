@@ -79,8 +79,33 @@ jobs:
             src-tauri/target/release/bundle/nsis/*.sig
           if-no-files-found: error
 
+  # Chooses where the Mac build runs: nate's own Mac when it is online and idle, otherwise GitHub's
+  # (so a sleeping or offline Mac never leaves a job hanging). Needs a repo secret RUNNER_STATUS_TOKEN
+  # (fine-grained PAT, this repo, "Administration: read") because GITHUB_TOKEN cannot list runners.
+  # Without the secret, or for PRs from forks, it always picks GitHub's runner.
+  pick-mac:
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.p.outputs.runner }}
+    steps:
+      - id: p
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          R='"macos-latest"'
+          if [ -n "$GH_TOKEN" ] && { [ "$EVENT" != "pull_request" ] || [ "$HEAD_REPO" = "$GITHUB_REPOSITORY" ]; }; then
+            N=$(gh api "repos/$GITHUB_REPOSITORY/actions/runners" --jq '[.runners[] | select(.status=="online" and .busy==false and any(.labels[]; .name=="transfer-mac"))] | length' 2>/dev/null || echo 0)
+            echo "idle self-hosted Mac runners: $N"
+            if [ "${N:-0}" -gt 0 ]; then R='["self-hosted","macOS","ARM64","transfer-mac"]'; fi
+          fi
+          echo "runner=$R" >> "$GITHUB_OUTPUT"
+          echo "mac runner: $R"
+
   macos:
-    runs-on: macos-latest
+    needs: pick-mac
+    runs-on: ${{ fromJSON(needs.pick-mac.outputs.runner) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

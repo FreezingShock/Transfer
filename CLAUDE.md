@@ -91,6 +91,14 @@ Experimental UI work goes on a branch (`ui-*`) so `main` never references comman
 - Portable `Transfer.exe` can't replace itself: the updater runs the installer, which installs a separate copy. Use the installer.
 - Versions before 0.4.3 have no updater: one manual install, then never again.
 
+## CI runners
+
+- PRs build Apple Silicon `.app` only and cancel superseded runs; `main` builds the universal dmg and releases. Rust caches are saved only on `main`.
+- GitHub's free Mac runners queue for 5-15 min at busy times (once a job was cancelled after 15 min in the queue; re-run it).
+- `pick-mac` job: runs the Mac build on Nathan's own Mac (self-hosted, labels `self-hosted, macOS, ARM64, transfer-mac`) when it is online and idle,
+  else on `macos-latest`. Needs repo secret `RUNNER_STATUS_TOKEN` (fine-grained PAT, this repo, Administration: read); without it GitHub's runner is always used.
+  Fork PRs never use the self-hosted runner.
+
 ## Product decisions (Nathan's choices)
 
 - Sorted folders are created **inside** each watched folder (`Downloads/Videos`, …).
