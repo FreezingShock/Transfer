@@ -158,7 +158,7 @@ addEventListener('pointermove', e => {
 /* gel: a small droplet arrives with each axis on its own spring, so it squeezes then settles */
 function gel(el) {
   if (reduce.matches) return;
-  const sx = new Spring(0.86, 520, 0.6), sy = new Spring(0.6, 380, 0.78), y = new Spring(18, 420, 1);
+  const sx = new Spring(0.9, 520, 1), sy = new Spring(0.7, 380, 1), y = new Spring(18, 420, 1);
   sx.to = sy.to = 1; y.to = 0;
   let last = performance.now(), o = 0;
   const tick = now => {
@@ -195,7 +195,7 @@ function chrome(animateInd = true) {
   const held = S.held.filter(h => inScope(h.path)).length;
   const t = $('tabs');
   const tInd = t.querySelector('.ind');
-  t.innerHTML = TABS.map(([id, label]) => `<a class="press" href="#${id}" aria-label="${label}${id === 'review' && held ? `, ${held} waiting` : ''}" ${cur() === id ? 'aria-current="page"' : ''}>${svg(P[id], 1.8)}${id === 'review' && held ? `<span class="badge">${held}</span>` : ''}</a>`).join('');
+  t.innerHTML = TABS.map(([id, label]) => `<a class="press" href="#${id}" aria-label="${label}${id === 'review' && held ? `, ${held} waiting` : ''}" ${cur() === id ? 'aria-current="page"' : ''}>${svg(P[id], 1.8)}<span>${label}</span>${id === 'review' && held ? `<span class="badge">${held}</span>` : ''}</a>`).join('');
   if (tInd) t.prepend(tInd);
   moveInd(t, t.querySelector('[aria-current=page]'), animateInd);
   // live chip
@@ -231,21 +231,58 @@ const row = (e, i, enter) => `<div class="row file ${enter ? 'enter' : ''} ${fre
 
 /* folder tiles: the sorted folders inside a watched folder, with real counts */
 function tilesHtml(s) {
-  const ts = (S.tiles[s.path] || []).filter(t => s.lines.includes(t.line) || t.count);
+  const ts = S.tiles[s.path] || [];
   if (!ts.length) return '';
-  return `<div class="tiles">${ts.map((t, i) => `<button class="tile glass press ${t.count ? '' : 'empty-tile'}" style="${lineVars(t.line)};--i:${i}" data-folder="${esc(t.path)}" data-drop="${t.line}"
-    title="Open ${esc(L(t.line).name)} in ${FILES} · drop a file here to move it">${icon(t.line, 'sm')}<span class="tn">${L(t.line).name}</span><b>${t.count}</b></button>`).join('')}</div>`;
+  return `<div class="tiles">${ts.map((t, i) => { const off = !s.lines.includes(t.line);
+    return `<button class="tile glass press ${t.count ? '' : 'empty-tile'} ${off ? 'off-tile' : ''}" style="${lineVars(t.line)};--i:${i}" data-folder="${esc(t.path)}" data-drop="${t.line}"
+    title="${off ? `This folder doesn't sort ${esc(L(t.line).name)}. ` : ''}Open ${esc(L(t.line).name)} in ${FILES} · drop a file here to move it">${icon(t.line, 'sm')}<span class="tn">${L(t.line).name}</span><b>${off && !t.count ? 'off' : t.count}</b></button>`; }).join('')}</div>`;
 }
 
 /* Home */
+const hourLabel = ts => {
+  const d = new Date(ts * 1e3), n = new Date(), y = new Date(n); y.setDate(n.getDate() - 1);
+  if (d.toDateString() === n.toDateString()) return 'Today, ' + d.toLocaleTimeString([], { hour: 'numeric' });
+  if (d.toDateString() === y.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+};
+/* everything that needs you, in one place: review queue, ask-first folders, old installers */
+function attention() {
+  const rows = [];
+  const held = S.held.filter(h => inScope(h.path)).length;
+  if (held) rows.push(`<button class="set press" data-go="review"><span class="dotn">${held}</span><span class="grow txt"><b>${held === 1 ? '1 file to review' : held + ' files to review'}</b><small>Transfer wasn't sure where they go</small></span><span style="color:var(--fg3)">${svg(P.chevR)}</span></button>`);
+  sources().filter(x => x.mode === 'ask' && x.online !== false && (!folder || x.path === folder)).forEach(x => {
+    const n = S.pending[x.path] || 0;
+    if (n) rows.push(`<button class="set press" data-sweep="${esc(x.path)}"><span class="dotn">${n}</span><span class="grow txt"><b>${n} ${n === 1 ? 'file' : 'files'} ready in ${esc(base(x.path))}</b><small>Sweep to sort them</small></span><span style="color:var(--fg3)">${svg(P.chevR)}</span></button>`);
+  });
+  const stale = S.stale.filter(x => inScope(x.path));
+  if (stale.length) {
+    const sz = stale.reduce((a, x) => a + x.size, 0);
+    rows.push(`<div class="set"><span class="dotn" style="${lineVars('installers')};background:color-mix(in srgb,var(--lc) 22%,transparent)">${stale.length}</span><span class="grow txt"><b>${stale.length === 1 ? '1 old installer' : stale.length + ' old installers'}</b><small>${size(sz)} you can free</small></span>
+      <button class="pill ${trashAsk ? 'acc' : 'ghost'} press" id="bTrash">${trashAsk ? `Move to ${BIN}` : 'Clear'}</button></div>`);
+  }
+  return rows.length ? `<div class="group glass attn">${rows.join('')}</div>` : '';
+}
+const MODE_HELP = { auto: 'Sorts files a few seconds after they land.', ask: 'Waits until you press Sweep.', off: 'Transfer ignores this folder.' };
+const modeToast = s => s.mode === 'auto' ? `${base(s.path)} sorts itself as files arrive` : s.mode === 'ask' ? `${base(s.path)} waits for you to sweep` : `${base(s.path)} is left alone`;
+async function setMode(s, m) { s.mode = m; await api.saveSettings(S.settings); toast(modeToast(s)); setTimeout(() => load(), 350); }
+function modeMenu(anchor, s) {
+  closeMenu();
+  const m = document.createElement('div'); m.className = 'menu'; m.style.width = '250px'; m.setAttribute('role', 'menu');
+  m.innerHTML = `<div class="mname">When files arrive in ${esc(base(s.path))}</div>` + MODES.map(([k, n]) =>
+    `<button class="mi" role="menuitemradio" aria-checked="${s.mode === k}" data-mm="${k}"><span class="mt"><b style="font-weight:600">${n}</b><small>${MODE_HELP[k]}</small></span></button>`).join('') +
+    `<div class="msep"></div><button class="mi" data-mm="more"><span class="mt"><b style="font-weight:600">Choose file types…</b><small>${s.lines.length} of 8 types sorted here</small></span></button>`;
+  $('win').appendChild(m);
+  const wb = $('win').getBoundingClientRect(), ab = anchor.getBoundingClientRect(), mb = m.getBoundingClientRect();
+  m.style.left = Math.max(8, Math.min(ab.left - wb.left, wb.width - mb.width - 8)) + 'px'; m.style.top = (ab.bottom - wb.top + 6) + 'px';
+  gel(m);
+  m.onclick = e => { const b = e.target.closest('[data-mm]'); if (!b) return; closeMenu(); if (b.dataset.mm === 'more') editFolder(s.path); else setMode(s, b.dataset.mm); };
+}
 function home(el, enter) {
   const s = src();
   const today0 = new Date(); today0.setHours(0, 0, 0, 0);
   const live = S.history.filter(e => !e.undone && inScope(e.from));
   const today = live.filter(e => e.ts * 1e3 >= today0).length;
-  const recent = live.slice(0, 6);
-  const stale = S.stale.filter(x => inScope(x.path));
-  let html = '';
+  let html = '', feed = '';
   if (!s) {
     html += `<div class="head"><div style="display:flex;flex-direction:column;gap:2px"><span class="sub">Today, across ${sources().filter(x => x.mode !== 'off').length} folders</span>
       <div class="big"><b data-count="${today}">${today}</b><span>files sorted</span></div></div></div>
@@ -253,38 +290,33 @@ function home(el, enter) {
         const n = S.history.filter(e => !e.undone && within(e.from, x.path) && e.ts * 1e3 >= today0).length;
         return `<button class="fcard glass press" data-pick="${esc(x.path)}" style="--c:${colorOf(x)}"><span class="top2"><span class="dot"></span>${esc(base(x.path))}</span>
           <b>${n}</b><span class="mode">${modeName(x)}</span></button>`;
-      }).join('')}</div>`;
+      }).join('')}</div>${attention()}`;
+    /* one feed across every folder, grouped by hour */
+    const groups = []; let i = 0;
+    live.slice(0, 12).forEach(e => { const k = hourLabel(e.ts); let g = groups[groups.length - 1]; if (!g || g.k !== k) groups.push(g = { k, rows: [] }); g.rows.push(e); });
+    feed = groups.length ? groups.map(g => `<div class="list"><span class="hour">${esc(g.k)}</span>${g.rows.map(e => row(e, i++, enter)).join('')}</div>`).join('') +
+      (live.length > 12 ? `<a class="more press ghost glass" href="#history">All activity</a>` : '')
+      : `<div class="empty">${svg(P.check, 1.6)}<span>Nothing moved yet. New files show up here.</span></div>`;
   } else {
-    const waiting = s.mode === 'ask' ? (S.pending[s.path] || 0) : 0;
-    html += `<div class="head"><div style="display:flex;flex-direction:column;gap:2px"><span class="h1">${esc(base(s.path))}</span>
-      <span class="sub">${s.mode === 'off' ? 'Not watched' : `${today} sorted today`} · sorts into ${s.lines.length} types</span></div></div>
-      <div class="seg glass small" id="modeSeg" role="group" aria-label="Mode">${MODES.map(([m, n]) => `<button class="press" data-mode="${m}" aria-pressed="${s.mode === m}">${n}</button>`).join('')}</div>
-      ${tilesHtml(s)}
-      ${waiting ? `<div class="banner">${svg(P.sparkle)}<span><b>${waiting} files</b> are ready to sort here.</span><button class="pill acc press" id="bBanner">Review sweep</button></div>` : ''}`;
+    const off = s.mode === 'off', offline = s.online === false;
+    const sub = offline ? 'This folder is offline. Plug the drive back in.' : off ? 'Not watched' : `${today} sorted today`;
+    const chip = `<button class="glass press chipmode ${s.mode}" id="bChip" aria-haspopup="menu" aria-label="Mode: ${MODES.find(m => m[0] === s.mode)[1]}"><i></i>${MODES.find(m => m[0] === s.mode)[1]}${svg(P.chevD, 2.2)}</button>`;
+    html += `<div class="head"><div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span class="h1">${esc(base(s.path))}</span>
+      <span class="sub">${sub}</span></div><div class="tools">${chip}</div></div>
+      ${tilesHtml(s)}${attention()}`;
+    const recent = live.slice(0, 6);
+    feed = recent.length ? `<div class="list"><span class="hour">Recent</span>${recent.map((e, i) => row(e, i, enter)).join('')}</div>` + (live.length > 6 ? `<a class="more press ghost glass" href="#history">All activity</a>` : '')
+      : `<div class="empty">${svg(P.check, 1.6)}<span>${off ? 'Turn on Auto or Ask first to start sorting this folder.' : 'Nothing moved yet. New files show up here.'}</span></div>`;
   }
-  html += recent.length ? `<div class="list">${recent.map((e, i) => row(e, i, enter)).join('')}</div>`
-    : `<div class="empty">${svg(P.check, 1.6)}<span>${s && s.mode === 'off' ? 'Turn on Auto or Ask first to start sorting this folder.' : 'Nothing moved yet. New files show up here.'}</span></div>`;
-  if (stale.length) {
-    const sz = stale.reduce((a, x) => a + x.size, 0);
-    html += `<div class="group glass"><div class="set">${icon('installers', 'sm')}<span class="grow">${stale.length} old installer${stale.length > 1 ? 's' : ''} · ${size(sz)}</span>
-      <button class="pill ${trashAsk ? 'acc' : 'ghost'} press" id="bTrash">${trashAsk ? `Move to ${BIN}` : 'Clear'}</button></div></div>`;
-  }
-  el.innerHTML = html;
+  el.innerHTML = html + feed;
   el.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => { folder = b.dataset.pick; go('f'); });
-  const ms = el.querySelector('#modeSeg');
-  if (ms) {
-    requestAnimationFrame(() => moveInd(ms, ms.querySelector('[aria-pressed=true]'), false));
-    ms.querySelectorAll('[data-mode]').forEach(b => b.onclick = async () => {
-      s.mode = b.dataset.mode; ms.querySelectorAll('[data-mode]').forEach(x => x.setAttribute('aria-pressed', x === b));
-      moveInd(ms, b); await api.saveSettings(S.settings);
-      toast(s.mode === 'auto' ? `${base(s.path)} sorts itself as files arrive` : s.mode === 'ask' ? `${base(s.path)} waits for you to sweep` : `${base(s.path)} is left alone`);
-      setTimeout(() => load(), 450);
-    });
-  }
-  const bb = el.querySelector('#bBanner'); if (bb) bb.onclick = sweep;
+  el.querySelectorAll('[data-go]').forEach(b => b.onclick = () => { location.hash = b.dataset.go; });
+  el.querySelectorAll('[data-sweep]').forEach(b => b.onclick = () => sweep(b.dataset.sweep));
+  const chip = el.querySelector('#bChip'); if (chip) chip.onclick = e => { e.stopPropagation(); modeMenu(chip, s); };
   const t = el.querySelector('#bTrash');
   if (t) t.onclick = async () => {
     if (!trashAsk) { trashAsk = true; return redraw(); }
+    const stale = S.stale.filter(x => inScope(x.path));
     await api.trash(stale.map(x => x.path)); trashAsk = false; toast(`Moved ${stale.length} installers to the ${BIN}`); load();
   };
   tweenCounts(el);
@@ -355,9 +387,9 @@ function settings(el) {
         <button class="set press" id="bAdd2" style="color:var(--fg2)">${svg(P.plus)}<span class="grow">Add a folder</span></button></div></div>
     <div style="display:flex;flex-direction:column;gap:6px"><span class="label">Sorting</span>
       <div class="group glass">
-        <label class="set"><span class="grow">Move when sure</span><input type="range" id="conf" min="40" max="95" step="5" value="${Math.round(s.confidence * 100)}"><output id="confO">${Math.round(s.confidence * 100)}%</output></label>
-        <label class="set"><span class="grow">Wait before moving</span><input type="range" id="settle" min="2" max="60" value="${s.settle_secs}"><output id="settleO">${s.settle_secs} s</output></label>
-        <label class="set"><span class="grow">Flag old installers</span><input type="range" id="stale" min="7" max="120" value="${s.stale_installer_days}"><output id="staleO">${s.stale_installer_days} d</output></label>
+        <label class="set"><span class="grow">Move when sure<span class="hint">Below this, a file waits in Review</span></span><input type="range" id="conf" min="40" max="95" step="5" value="${Math.round(s.confidence * 100)}"><output id="confO">${Math.round(s.confidence * 100)}%</output></label>
+        <label class="set"><span class="grow">Wait before moving<span class="hint">Lets downloads finish first</span></span><input type="range" id="settle" min="2" max="60" value="${s.settle_secs}"><output id="settleO">${s.settle_secs} s</output></label>
+        <label class="set"><span class="grow">Flag old installers<span class="hint">Offer to clear ones older than this</span></span><input type="range" id="stale" min="7" max="120" value="${s.stale_installer_days}"><output id="staleO">${s.stale_installer_days} d</output></label>
       </div></div>
     <div style="display:flex;flex-direction:column;gap:6px"><span class="label">Tidy up</span>
       <div class="group glass"><button class="set press" id="bDupes">${icon('archives', 'sm').replace(P.archives, P.dupes)}<span class="grow">Find duplicate files</span><span style="color:var(--fg3)">${svg(P.chevR)}</span></button></div></div>
@@ -415,13 +447,14 @@ function closeSheet() {
 }
 addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
 
-async function sweep() {
-  const plans = await api.plan(folder);
+async function sweep(only) {
+  const target = only === undefined ? folder : only;
+  const plans = await api.plan(target);
   const moves = plans.flatMap(p => p.moves);
   const by = {}; moves.forEach(m => (by[m.line] = by[m.line] || []).push(m));
   const order = LINES.filter(l => by[l.id]);
   let open = order[0] && order[0].id;
-  const where = folder ? base(folder) : 'all folders';
+  const where = target ? base(target) : 'all folders';
   const draw = sh => {
     sh.innerHTML = `<span class="grip" aria-hidden="true"></span>
       <div style="display:flex;flex-direction:column;gap:2px;padding:0 4px"><span class="h1">Sweep ${esc(where)}</span>
@@ -435,7 +468,7 @@ async function sweep() {
     sh.querySelectorAll('[data-close]').forEach(b => b.onclick = closeSheet);
     sh.querySelectorAll('[data-g]').forEach(b => b.onclick = () => { open = open === b.dataset.g ? null : b.dataset.g; draw(sh); });
     const y = sh.querySelector('#sYes');
-    if (y) y.onclick = async () => { y.disabled = true; const done = await api.apply(folder); done.forEach(e => fresh.add(e.id)); closeSheet(); toast(`Moved ${done.length} file${done.length === 1 ? '' : 's'}`); load(); };
+    if (y) y.onclick = async () => { y.disabled = true; const done = await api.apply(target); done.forEach(e => fresh.add(e.id)); closeSheet(); toast(`Moved ${done.length} file${done.length === 1 ? '' : 's'}`); load(); };
   };
   sheet('', draw);
 }
@@ -480,7 +513,7 @@ async function addFolder() {
 
 /* ---------- shared ---------- */
 $('bLive').onclick = async () => { S.settings.paused = !S.settings.paused; await api.saveSettings(S.settings); chrome(); toast(S.settings.paused ? 'Paused. Nothing will move.' : 'Sorting again'); };
-$('bSweep').onclick = sweep;
+$('bSweep').onclick = () => sweep();
 $('view').addEventListener('click', async ev => {
   const u = ev.target.closest('[data-undo]'); if (!u) return;
   ev.stopPropagation();
@@ -492,7 +525,7 @@ let tt;
 function toast(msg, undoId) {
   const old = document.querySelector('.toast'); if (old) old.remove(); clearTimeout(tt);
   const t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status');
-  t.innerHTML = `<span>${esc(msg)}</span>${undoId ? '<button class="press">Undo</button>' : ''}`;
+  t.innerHTML = `<i class="td" aria-hidden="true"></i><span>${esc(msg)}</span>${undoId ? '<button class="press">Undo</button>' : ''}`;
   $('win').appendChild(t); gel(t);
   if (undoId) t.querySelector('button').onclick = async () => { await api.undo(undoId); t.remove(); load(); };
   tt = setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 200); }, 3800);
@@ -630,7 +663,7 @@ if (T) {
 addEventListener('resize', () => chrome(false));
 load('f');
 
-/* prototype-only controls */
+/* demo-only controls (hidden in the app) */
 $('dWall').onclick = () => $('wall').classList.toggle('blue');
 $('dFile').onclick = () => api._simulate && api._simulate();
 

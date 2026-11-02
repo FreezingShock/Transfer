@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Transfer</title>
+<style>
+:root{--font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+  --tint:rgba(14,16,30,.66);--fg:#fff;--fg2:rgba(255,255,255,.8);--fg3:rgba(255,255,255,.6);
+  --s1:rgba(255,255,255,.07);--s2:rgba(255,255,255,.12);--edge:rgba(255,255,255,.16);--hi:rgba(255,255,255,.28);
+  --solid:#fff;--solid-ink:#101220;--acc:#8e8cf5;--out:cubic-bezier(.22,1,.36,1);color-scheme:dark}
+[data-theme=light]{--tint:rgba(248,248,252,.78);--fg:#0d1020;--fg2:rgba(13,16,32,.74);--fg3:rgba(13,16,32,.58);
+  --s1:rgba(255,255,255,.45);--s2:rgba(255,255,255,.6);--edge:rgba(255,255,255,.7);--hi:rgba(255,255,255,.9);
+  --solid:#101220;--solid-ink:#fff;color-scheme:light}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:transparent}
+body{font:13px/1.35 var(--font);color:var(--fg);-webkit-font-smoothing:antialiased;user-select:none;overflow:hidden}
+button{font:inherit;color:inherit;border:0;background:none;padding:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.pop{height:100%;display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:18px;background:var(--tint);border:1px solid var(--edge);box-shadow:inset 0 1px 0 var(--hi);animation:in .26s var(--out)}
+@keyframes in{from{opacity:0;transform:translateY(6px) scale(.985)}}
+@media (prefers-reduced-motion:reduce){.pop{animation:none}}
+.ph{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.ph b{font-size:15px;font-weight:650}
+.live{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 11px 0 10px;border-radius:14px;background:var(--s1);border:1px solid var(--edge);box-shadow:inset 0 1px 0 var(--hi);font-size:12px;font-weight:650}
+.live i{width:8px;height:8px;border-radius:50%;background:#30d158;box-shadow:0 0 8px #30d158}
+.live.paused i{background:#ff9f0a;box-shadow:none}
+.num{display:flex;align-items:baseline;gap:8px}.num b{font-size:34px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1}
+.num span{color:var(--fg3);font-size:12.5px}
+.label{font-size:11px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--fg3)}
+.list{display:flex;flex-direction:column;gap:2px;flex:1;min-height:0;overflow:hidden}
+.row{display:flex;align-items:center;gap:10px;padding:6px 4px;border-radius:10px}
+.ic{width:26px;height:26px;border-radius:8px;flex:none;background:color-mix(in srgb,var(--lc) 24%,transparent);display:flex;align-items:center;justify-content:center}
+.ic i{width:9px;height:9px;border-radius:50%;background:var(--lc)}
+.txt{display:flex;flex-direction:column;min-width:0;flex:1}
+.txt b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.txt span,.when{font-size:11.5px;color:var(--fg3)}
+.empty{flex:1;display:flex;align-items:center;justify-content:center;color:var(--fg3);text-align:center;padding:0 16px}
+.pb{display:flex;gap:8px}
+.btn{flex:1;height:36px;border-radius:18px;font-weight:650;font-size:13px;transition:transform .3s var(--out)}
+.btn:active{transform:scale(1.04)}
+.ghost{background:var(--s1);border:1px solid var(--edge);box-shadow:inset 0 1px 0 var(--hi)}
+.acc{color:color-mix(in srgb,var(--acc) 40%,var(--fg));border:1px solid color-mix(in srgb,var(--acc) 50%,var(--edge));
+  background:linear-gradient(180deg,color-mix(in srgb,var(--acc) 42%,transparent),color-mix(in srgb,var(--acc) 22%,transparent));
+  box-shadow:inset 0 1px 0 var(--hi),0 6px 20px color-mix(in srgb,var(--acc) 20%,transparent)}
+</style>
+</head>
+<body>
+<div class="pop" id="pop" role="dialog" aria-label="Transfer"></div>
+<script src="tray.js"></script>
+</body>
+</html>
