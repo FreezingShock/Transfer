@@ -67,7 +67,7 @@ Experimental UI work goes on a branch (`ui-*`) so `main` never references comman
 - **Every move is journaled** (`journal.tsv`) and undoable. Nothing is overwritten (`name (2).ext`).
   Trash only via OS Recycle Bin/Trash, and only for files inside watched folders.
 - **Privacy:** only `settings.txt`, `journal.tsv`, `model.tsv` (hashed token counts, no words) in the
-  app data folder. No network. Opening/revealing files is limited to paths inside watched folders.
+  app data folder. No network except the in-app updater (see below). Opening/revealing files is limited to paths inside watched folders.
 - `exists()` follows symlinks; use `symlink_metadata` checks (`present()`) for shortcuts.
 - **Cloud-only files are never read.** OneDrive online-only (RECALL_ON_* / OFFLINE attrs) and iCloud evicted
   (`SF_DATALESS`) files are ineligible and skipped by duplicates, because opening them downloads them (`cloud.rs`).
@@ -77,6 +77,19 @@ Experimental UI work goes on a branch (`ui-*`) so `main` never references comman
 - **Folders that are offline stay in settings** (unplugged drive, share); the UI shows them as Offline.
 - On Windows, Desktop/Downloads/Documents come from `SHGetKnownFolderPath` (OneDrive moves them); old settings
   pointing at `%USERPROFILE%\Desktop` are relocated on load. Mac keeps `~/Desktop` (iCloud doesn't move it).
+
+## Auto-update (v0.4.3)
+
+- Tauri updater plugin, called from Rust only (`check_update` / `install_update`); the UI has no updater permission.
+  Endpoint: `releases/latest/download/latest.json` on this repo. Settings has a Check/Install row; the app also checks
+  8 s after launch and every 6 h, and toasts when an update exists. It never installs without a click.
+- Updates are verified against the minisign public key in `tauri.conf.json` (`plugins.updater.pubkey`). The private key
+  is the repo secret `TAURI_SIGNING_PRIVATE_KEY` (no password). **If it is lost, installed apps can never update again.**
+- CI signs only if that secret exists (`createUpdaterArtifacts` via `--config`), and the release job writes `latest.json`
+  (windows-x86_64 → NSIS setup.exe, darwin-aarch64/x86_64 → the universal `.app.tar.gz`). Without the secret it still
+  releases, with a warning and no `latest.json`.
+- Portable `Transfer.exe` can't replace itself: the updater runs the installer, which installs a separate copy. Use the installer.
+- Versions before 0.4.3 have no updater: one manual install, then never again.
 
 ## Product decisions (Nathan's choices)
 

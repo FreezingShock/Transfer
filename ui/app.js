@@ -73,6 +73,8 @@ const api = T ? {
   search: query => T.core.invoke('search', { query }).then(JSON.parse),
   duplicates: () => T.core.invoke('duplicates').then(JSON.parse),
   trashFiles: paths => T.core.invoke('trash_files', { paths }),
+  checkUpdate: () => T.core.invoke('check_update'),
+  installUpdate: () => T.core.invoke('install_update'),
   on: (ev, cb) => T.event.listen(ev, e => cb(e.payload)),
 } : demoApi();
 
@@ -392,7 +394,9 @@ function settings(el) {
     <div style="display:flex;flex-direction:column;gap:6px"><span class="label">Tidy up</span>
       <div class="group glass"><button class="set press" id="bDupes">${icon('archives', 'sm').replace(P.archives, P.dupes)}<span class="grow">Find duplicate files</span><span style="color:var(--fg3)">${svg(P.chevR)}</span></button></div></div>
     <div class="group glass"><label class="set"><span class="grow">Open at login</span><input type="checkbox" class="sw" id="login" ${s.launch_at_login ? 'checked' : ''}></label></div>
-    <div class="note">${svg(P.lock)}<span>Runs only on this computer. Nothing is uploaded.</span></div>`;
+    <div class="group glass"><button class="set press" id="bUpd"><span class="grow" id="updT"></span><span class="val" id="updV"></span></button></div>
+    <div class="note">${svg(P.lock)}<span>Sorts only on this computer. Nothing is uploaded. Updates are the one thing fetched, signed, from GitHub.</span></div>`;
+  updRow(el);
   const save = () => api.saveSettings(s);
   const ts = el.querySelector('#themeSeg');
   requestAnimationFrame(() => moveInd(ts, ts.querySelector('[aria-pressed=true]'), false));
@@ -408,6 +412,26 @@ function settings(el) {
   rng('stale', v => s.stale_installer_days = v, v => v + ' d');
   el.querySelector('#login').onchange = e => { s.launch_at_login = e.target.checked; save(); };
 }
+
+/* Updates: Rust asks GitHub Releases for a signed latest.json; nothing else touches the network */
+let upd = null, updBusy = false;
+function updRow(el) {
+  const b = el.querySelector('#bUpd'); if (!b) return;
+  const set = (t, v) => { el.querySelector('#updT').textContent = t; el.querySelector('#updV').textContent = v || ''; };
+  set(upd ? 'Install update' : 'Check for updates', upd ? 'v' + upd : '');
+  b.onclick = async () => {
+    if (updBusy) return; updBusy = true;
+    try {
+      if (upd) { set('Updating…', ''); await api.installUpdate(); }
+      else { set('Checking…', ''); upd = await api.checkUpdate(); upd ? set('Install update', 'v' + upd) : set('Up to date', ''); }
+    } catch (e) { set('Couldn\u2019t reach updates', 'Retry'); }
+    updBusy = false;
+  };
+}
+async function autoCheck() {
+  try { const v = await api.checkUpdate(); if (v && v !== upd) { upd = v; toast(`Update ${v} is ready. Install it in Settings.`); if (cur() === 'settings') redraw(); } } catch (e) {}
+}
+setTimeout(autoCheck, 8000); setInterval(autoCheck, 6 * 3600e3);
 
 /* ---------- sheets ---------- */
 function sheet(html, bind, acc) {
@@ -722,6 +746,8 @@ function demoApi() {
     trash: paths => { stale = stale.filter(s => !paths.includes(s.path)); return R(paths.length); },
     saveSettings: s => { Object.assign(settings, JSON.parse(JSON.stringify(s))); return R(true); },
     pickFolder: () => R(H + (fi % 2 ? 'Projects' : 'Pictures/Screenshots')),
+    checkUpdate: () => R(null),
+    installUpdate: () => R(null),
     on: () => {},
     _simulate: async () => {
       const [s, n, l] = files[fi++ % files.length];

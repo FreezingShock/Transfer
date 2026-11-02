@@ -23,6 +23,7 @@ use transfer_core::engine::Engine;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_updater::UpdaterExt;
 use transfer_core::browse;
 use transfer_core::settings::{Mode, Source};
 use transfer_core::watch::{self, WatchEvent, WatchHandle};
@@ -154,6 +155,25 @@ async fn search(app: State<'_, App>, query: String) -> Res {
 async fn duplicates(app: State<'_, App>) -> Res {
     let settings = app.eng.lock().unwrap().settings.clone();
     Ok(json::duplicates(&browse::duplicates(&settings)))
+}
+
+/// The only network call in the app: asks GitHub Releases for latest.json (signed; the
+/// public key is in tauri.conf.json). Returns the new version, or None when up to date.
+#[tauri::command]
+async fn check_update(handle: AppHandle) -> Result<Option<String>, String> {
+    let up = handle.updater().map_err(|e| e.to_string())?;
+    Ok(up.check().await.map_err(|e| e.to_string())?.map(|u| u.version))
+}
+
+/// Downloads the signed update, installs it and restarts. Verified against the public key first.
+#[tauri::command]
+async fn install_update(handle: AppHandle) -> Result<(), String> {
+    let up = handle.updater().map_err(|e| e.to_string())?;
+    if let Some(u) = up.check().await.map_err(|e| e.to_string())? {
+        u.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+        handle.restart();
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -376,11 +396,12 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .manage(App { eng: eng.clone(), _watch: Mutex::new(None) })
         .invoke_handler(tauri::generate_handler![
             get_state, plan, apply, pick_folder, undo, correct, route, trash, save_settings,
-            open_path, reveal, move_to, search, duplicates, trash_files, toggle_pause, tray_action
+            open_path, reveal, move_to, search, duplicates, trash_files, check_update, install_update, toggle_pause, tray_action
         ])
         .setup(move |app| {
             // live watcher → UI event per move
