@@ -139,8 +139,8 @@ jobs:
         if: steps.ver.outputs.new == 'true'
         run: |
           V=${{ steps.ver.outputs.version }}
-          WIN=$(ls dist/Transfer-windows/**/*-setup.exe 2>/dev/null | head -1 || true)
-          MAC=$(ls dist/Transfer-macos/**/*.app.tar.gz 2>/dev/null | head -1 || true)
+          WIN=$(find dist/Transfer-windows -name '*-setup.exe' | head -1)
+          MAC=$(find dist/Transfer-macos -name '*.app.tar.gz' | head -1)
           if [ -n "$WIN" ] && [ -f "$WIN.sig" ] && [ -n "$MAC" ] && [ -f "$MAC.sig" ]; then
             BASE="https://github.com/${{ github.repository }}/releases/download/v$V"
             node -e '
@@ -156,7 +156,11 @@ jobs:
       - name: Release has the Windows and macOS installers
         if: steps.ver.outputs.new == 'true'
         run: |
-          ls dist/Transfer-windows/**/*.exe dist/Transfer-windows/**/*.msi dist/Transfer-macos/**/*.dmg
+          # find, not ls with **: bash has no globstar here, and artifact folders nest differently per platform.
+          find dist -type f \( -name '*.exe' -o -name '*.msi' -o -name '*.dmg' \)
+          for pat in 'Transfer.exe' '*-setup.exe' '*.msi' '*.dmg'; do
+            test -n "$(find dist -type f -name "$pat" | head -1)" || { echo "::error::missing $pat"; exit 1; }
+          done
       - name: Publish release (Windows + macOS)
         if: steps.ver.outputs.new == 'true'
         uses: softprops/action-gh-release@v2
