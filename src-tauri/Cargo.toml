@@ -1,6 +1,6 @@
 [package]
 name = "transfer-app"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2021"
 description = "Transfer: automatic, on-device sorting for Desktop, Downloads and Documents"
 
@@ -14,6 +14,7 @@ tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 
 [profile.release]
