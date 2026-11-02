@@ -130,3 +130,6 @@ He's on both Windows and Mac. He wants direct, honest status: say what's tested 
 claim a release is ready until assets are verified. Ask about scope and taste before big UI changes
 (he likes a quick multiple-choice round), show a prototype for redesigns, then build.
 He'll send screenshots of what he sees; compare against what the code should render.
+**Merging and releases (his standing rule, 2026-11-02):** this repo is just for him. Merge your own PRs as soon
+as CI is green, without asking, and publish a new release for user-facing changes (bump the version in the PR).
+Still verify the release assets before saying it's out, and still say what wasn't tested on real hardware.
