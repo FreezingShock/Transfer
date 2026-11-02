@@ -96,9 +96,12 @@ jobs:
         run: |
           R='"macos-latest"'
           if [ -n "$GH_TOKEN" ] && { [ "$EVENT" != "pull_request" ] || [ "$HEAD_REPO" = "$GITHUB_REPOSITORY" ]; }; then
-            N=$(gh api "repos/$GITHUB_REPOSITORY/actions/runners" --jq '[.runners[] | select(.status=="online" and .busy==false and any(.labels[]; .name=="transfer-mac"))] | length' 2>/dev/null || echo 0)
-            echo "idle self-hosted Mac runners: $N"
-            if [ "${N:-0}" -gt 0 ]; then R='["self-hosted","macOS","ARM64","transfer-mac"]'; fi
+            if N=$(gh api "repos/$GITHUB_REPOSITORY/actions/runners" --jq '[.runners[] | select(.status=="online" and .busy==false and any(.labels[]; .name=="transfer-mac"))] | length' 2>/tmp/err); then
+              echo "idle self-hosted Mac runners: $N"
+              if [ "$N" -gt 0 ]; then R='["self-hosted","macOS","ARM64","transfer-mac"]'; fi
+            else
+              echo "::warning::Could not list runners (check RUNNER_STATUS_TOKEN has Administration: read): $(cat /tmp/err)"
+            fi
           fi
           echo "runner=$R" >> "$GITHUB_OUTPUT"
           echo "mac runner: $R"
