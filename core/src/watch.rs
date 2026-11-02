@@ -89,7 +89,11 @@ pub fn start_with_interval(
                                     seen.remove(&path);
                                     on_event(WatchEvent::Moved(e));
                                 }
-                                Some(Err(msg)) => on_event(WatchEvent::Failed(msg)),
+                                // e.g. locked by another app: report once a minute, not every tick
+                                Some(Err(msg)) => {
+                                    slot.1 = Instant::now() + Duration::from_secs(60);
+                                    on_event(WatchEvent::Failed(msg));
+                                }
                                 // held for review or ineligible: don't re-check it every tick
                                 None => slot.1 = Instant::now() + Duration::from_secs(3600),
                             }

@@ -10,13 +10,14 @@ Read this before changing anything. Keep it current when a decision changes.
 
 | Path | What |
 |---|---|
-| `core/` | `transfer-core`: classifier, planner, mover, undo journal, local learner, watcher, browse (tiles/search/duplicates). **std only, zero dependencies, no network code.** Keep it that way. |
+| `core/` | `transfer-core`: classifier, planner, mover, undo journal, local learner, watcher, browse (tiles/search/duplicates), cloud-placeholder check, OS trash. **std only, zero dependencies, no network code.** Keep it that way. OS calls go through small `extern` blocks (`getxattr`, `SHGetKnownFolderPath`, `SHFileOperationW`, `NSFileManager`), not crates. |
 | `cli/` | `transfer` binary on the same engine. `plan`, `apply`, `watch`, `history`, `undo`, `correct`, `route`, `move`, `search`, `dupes`, `explain`, `state`. Fastest way to test engine changes. |
 | `src-tauri/` | Desktop shell: window, tray, commands, plugins (autostart, dialog, opener, notification, all called from Rust only). Excluded from the root workspace; builds via `npx tauri build`. |
 | `ui/` | `index.html` (all CSS) + `app.js` (all logic). Runs in the app, or in a plain browser on built-in demo data (`demoApi()`). |
 | `demo/make_mess.py` | Builds a fake messy Desktop/Downloads/Documents with real file signatures. |
-| `tools/ui-csp-check.js` | Renders the UI under the app's real CSP; fails visibly if inline styles get blocked. Run before every release. |
-| `.github/workflows/build.yml` | CI: Windows + universal macOS builds, then one combined release. |
+| `tools/ui-csp-check.js` | Renders the UI under the app's real CSP; exits 1 if inline styles get blocked. Runs in CI. |
+| `docs/smoke-test.md` | Manual checklist per OS. Run on real hardware before announcing a release. |
+| `.github/workflows/build.yml` | CI: tests + CSP check + version check, Windows + universal macOS builds (also on PRs), then one combined release from `main`. |
 
 ## Build and test
 
@@ -26,7 +27,10 @@ python3 demo/make_mess.py /tmp/mess
 TRANSFER_HOME=/tmp/mess/.h ./target/debug/transfer plan /tmp/mess/Desktop /tmp/mess/Downloads /tmp/mess/Documents
 TRANSFER_HOME=/tmp/mess/.h ./target/debug/transfer state   # exact JSON the UI receives
 node tools/ui-csp-check.js                 # needs playwright
-npm install && npm run dev                 # the real app (needs WebView2 / macOS WebKit)
+npm ci && npm run dev                      # the real app (needs WebView2 / macOS WebKit)
+# Cross-check platform code from Linux (no linking): rustup target add x86_64-pc-windows-gnu aarch64-apple-darwin
+cargo check -p transfer-core --target x86_64-pc-windows-gnu   # and --target aarch64-apple-darwin
+(cd src-tauri && cargo check --target x86_64-pc-windows-gnu) # needs mingw-w64 gcc + windres
 ```
 
 UI changes: open `ui/index.html` in a browser (demo data), and also load it with a
@@ -36,13 +40,14 @@ real `transfer state` payload under the app CSP (see the check script) before sh
 
 1. Bump the version in **three** places: `src-tauri/tauri.conf.json`, `package.json`, `src-tauri/Cargo.toml`.
 2. Commit and push to `main`. CI builds Windows and macOS in parallel.
-3. The `release` job publishes `v<version>` **only if that tag doesn't exist yet and both builds passed**,
+3. The `release` job publishes `v<version>` **only if that tag doesn't exist yet and tests + both builds passed**,
    with `Transfer.exe` (portable), `*_x64-setup.exe`, `*.msi`, `*_universal.dmg`.
 4. Verify assets before telling Nathan it's ready:
    `gh api repos/FreezingShock/Transfer/releases/tags/vX.Y.Z --jq '.assets[].name'`.
    Never announce a release from a still-running build.
 
-Pushes without a version bump build but don't release. Tag pushes and GitHub write API calls
+Pushes without a version bump build but don't release. PRs run the same tests and builds but never release.
+`src-tauri/Cargo.lock` and `package-lock.json` are committed so release builds are reproducible; CI uses `npm ci`. Tag pushes and GitHub write API calls
 are blocked from Claude's cloud sessions; that's why releases key off the version number.
 Experimental UI work goes on a branch (`ui-*`) so `main` never references commands that don't exist yet.
 
@@ -64,6 +69,14 @@ Experimental UI work goes on a branch (`ui-*`) so `main` never references comman
 - **Privacy:** only `settings.txt`, `journal.tsv`, `model.tsv` (hashed token counts, no words) in the
   app data folder. No network. Opening/revealing files is limited to paths inside watched folders.
 - `exists()` follows symlinks; use `symlink_metadata` checks (`present()`) for shortcuts.
+- **Cloud-only files are never read.** OneDrive online-only (RECALL_ON_* / OFFLINE attrs) and iCloud evicted
+  (`SF_DATALESS`) files are ineligible and skipped by duplicates, because opening them downloads them (`cloud.rs`).
+- **Refreshes must stay cheap.** `get_state` runs after every move; the engine caches verdicts by
+  path + size + mtime + model size + threshold. Don't add per-file disk reads to `json::state` without caching.
+  All Tauri commands are `async` so they never run on the window thread.
+- **Folders that are offline stay in settings** (unplugged drive, share); the UI shows them as Offline.
+- On Windows, Desktop/Downloads/Documents come from `SHGetKnownFolderPath` (OneDrive moves them); old settings
+  pointing at `%USERPROFILE%\Desktop` are relocated on load. Mac keeps `~/Desktop` (iCloud doesn't move it).
 
 ## Product decisions (Nathan's choices)
 
@@ -82,7 +95,7 @@ Experimental UI work goes on a branch (`ui-*`) so `main` never references comman
 
 ## Design (Liquid Glass)
 
-- Small window (440×700), transparent with OS acrylic (Windows) / vibrancy (macOS) under a theme tint.
+- Small window (440×700), transparent with OS Mica (Windows 11) / acrylic (Windows 10) / vibrancy (macOS) under a theme tint.
   Light / Dark / System (follows the OS; toggle in Settings).
 - Window controls: macOS-style dots, **top-left on Mac, top-right on Windows** (close outermost).
 - Folder accents: Desktop `#0a84ff`, Downloads `#bf5af2`, Documents `#30c4a8`, added folders cycle.
@@ -102,9 +115,12 @@ Experimental UI work goes on a branch (`ui-*`) so `main` never references comman
 - **Unconfirmed misfile:** on Nathan's PC, `.hdr`, `.bin`, `.blend` and `.woff2` files landed in Code.
   The engine holds these for Review in tests; ask whether he routed them himself. If not, investigate
   `classify.rs` and the learner's influence.
-- **Not yet tested on a real Mac:** folder permissions, Finder trash (AppleScript), notifications, vibrancy.
+- **Not yet tested on a real Mac:** folder permissions, native Trash (`NSFileManager`, Finder fallback), notifications, vibrancy.
+  v0.4.2's Windows FFI (known folders, `SHFileOperationW`, Mica, cloud attrs) type-checks but hadn't run on Windows either.
+- **Roadmap** (2026-11-02 review): phases 1-2 shipped in v0.4.2. Next: v0.5 UI after Nathan answers the five taste
+  questions; JSON/glTF text currently routes to Code (braces look like code); `--gel`/`gel()` still overshoot slightly.
 - **Windows notifications** may not show for the portable exe (no registered app id); the installer fixes that.
-- Watcher polls every 2 s; switch the shell to native file events if many folders are added.
+- Watcher polls every 2 s (a failing move retries once a minute); switch the shell to native file events if many folders are added.
 - Code signing (Windows certificate; Apple Developer ID + notarization) and auto-updates before sharing publicly.
 - Topic sorting for Documents (School / Work / Receipts) with an on-device text model: later phase.
 

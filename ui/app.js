@@ -34,6 +34,8 @@ const HOLD = { id: 'holding', name: 'Review', c: '#c7c7cc', d: '#5a5a66' };
 const L = id => LINES.find(l => l.id === id) || HOLD;
 const FCOLORS = ['#0a84ff', '#bf5af2', '#30c4a8', '#ff9f0a', '#ff375f', '#64d2ff'];
 const MODES = [['auto', 'Auto'], ['ask', 'Ask first'], ['off', 'Off']];
+/* a folder on an unplugged drive or share stays in settings, marked offline */
+const modeName = s => s.online === false ? 'Offline' : MODES.find(m => m[0] === s.mode)[1];
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -49,7 +51,11 @@ const within = (file, folder) => norm(file).startsWith(norm(folder) + '/');
 
 /* ---------- bridge ---------- */
 const T = window.__TAURI__;
-if (/Windows/i.test(navigator.userAgent)) document.documentElement.classList.add('os-win');
+const OS = /Windows/i.test(navigator.userAgent) ? 'win' : /Mac/i.test(navigator.userAgent) ? 'mac' : 'linux';
+if (OS === 'win') document.documentElement.classList.add('os-win');
+/* the OS's own words for its trash and file manager */
+const BIN = OS === 'win' ? 'Recycle Bin' : 'Trash';
+const FILES = OS === 'win' ? 'File Explorer' : OS === 'mac' ? 'Finder' : 'Files';
 if (T) document.documentElement.classList.add('native'), document.body.classList.add('native');
 const api = T ? {
   state: () => T.core.invoke('get_state').then(JSON.parse),
@@ -177,7 +183,7 @@ function chrome(animateInd = true) {
   const fInd = f.querySelector('.ind');
   f.innerHTML = `<button class="press" data-f="" ${!folder ? 'aria-pressed="true"' : 'aria-pressed="false"'}>All</button>` +
     sources().map(s => `<button class="press" data-f="${esc(s.path)}" aria-pressed="${s.path === folder}" style="--c:${colorOf(s)}" title="${esc(s.path)}">
-      <span class="dot" style="opacity:${s.mode === 'off' ? .35 : 1}"></span>${esc(base(s.path))}</button>`).join('') +
+      <span class="dot" style="opacity:${s.mode === 'off' || s.online === false ? .35 : 1}"></span>${esc(base(s.path))}</button>`).join('') +
     `<button class="add press" id="bAdd" aria-label="Add a folder">${svg(P.plus)}</button>`;
   if (fInd) f.prepend(fInd);
   moveInd(f, f.querySelector('[aria-pressed=true]'), animateInd);
@@ -226,7 +232,7 @@ function tilesHtml(s) {
   const ts = (S.tiles[s.path] || []).filter(t => s.lines.includes(t.line) || t.count);
   if (!ts.length) return '';
   return `<div class="tiles">${ts.map((t, i) => `<button class="tile glass press ${t.count ? '' : 'empty-tile'}" style="${lineVars(t.line)};--i:${i}" data-folder="${esc(t.path)}" data-drop="${t.line}"
-    title="Open ${esc(L(t.line).name)} in File Explorer · drop a file here to move it">${icon(t.line, 'sm')}<span class="tn">${L(t.line).name}</span><b>${t.count}</b></button>`).join('')}</div>`;
+    title="Open ${esc(L(t.line).name)} in ${FILES} · drop a file here to move it">${icon(t.line, 'sm')}<span class="tn">${L(t.line).name}</span><b>${t.count}</b></button>`).join('')}</div>`;
 }
 
 /* Home */
@@ -244,7 +250,7 @@ function home(el, enter) {
       <div class="cards">${sources().map(x => {
         const n = S.history.filter(e => !e.undone && within(e.from, x.path) && e.ts * 1e3 >= today0).length;
         return `<button class="fcard glass press" data-pick="${esc(x.path)}" style="--c:${colorOf(x)}"><span class="top2"><span class="dot"></span>${esc(base(x.path))}</span>
-          <b>${n}</b><span class="mode">${MODES.find(m => m[0] === x.mode)[1]}</span></button>`;
+          <b>${n}</b><span class="mode">${modeName(x)}</span></button>`;
       }).join('')}</div>`;
   } else {
     const waiting = s.mode === 'ask' ? (S.pending[s.path] || 0) : 0;
@@ -259,7 +265,7 @@ function home(el, enter) {
   if (stale.length) {
     const sz = stale.reduce((a, x) => a + x.size, 0);
     html += `<div class="group glass"><div class="set">${icon('installers', 'sm')}<span class="grow">${stale.length} old installer${stale.length > 1 ? 's' : ''} · ${size(sz)}</span>
-      <button class="pill ${trashAsk ? 'acc' : 'ghost'} press" id="bTrash">${trashAsk ? 'Move to Recycle Bin' : 'Clear'}</button></div></div>`;
+      <button class="pill ${trashAsk ? 'acc' : 'ghost'} press" id="bTrash">${trashAsk ? `Move to ${BIN}` : 'Clear'}</button></div></div>`;
   }
   el.innerHTML = html;
   el.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => { folder = b.dataset.pick; go('f'); });
@@ -277,7 +283,7 @@ function home(el, enter) {
   const t = el.querySelector('#bTrash');
   if (t) t.onclick = async () => {
     if (!trashAsk) { trashAsk = true; return redraw(); }
-    await api.trash(stale.map(x => x.path)); trashAsk = false; toast(`Moved ${stale.length} installers to the Recycle Bin`); load();
+    await api.trash(stale.map(x => x.path)); trashAsk = false; toast(`Moved ${stale.length} installers to the ${BIN}`); load();
   };
   tweenCounts(el);
 }
@@ -323,13 +329,16 @@ function history(el, enter) {
   const groups = {};
   rows.forEach(e => { const d = new Date(e.ts * 1e3); const k = d.toDateString() === new Date().toDateString() ? 'Today' : d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }); (groups[k] = groups[k] || []).push(e); });
   let i = 0;
+  const list = () => Object.entries(groups).map(([k, es]) => `<div class="list"><span class="label" style="padding:4px 6px">${esc(k)}</span>${es.map(e => {
+      return row(e, i++, enter).replace('class="row file', e.undone ? 'style="opacity:.45" class="row file' : 'class="row file');
+    }).join('')}</div>`).join('') || `<div class="empty">${svg(P.search, 1.6)}<span>No moves match.</span></div>`;
+  if (el.querySelector('#hlist') && !enter) { el.querySelector('#hlist').innerHTML = list(); return; }
   el.innerHTML = `<div class="head"><span class="h1">History</span><span class="sub">Click to open · right-click for more</span></div>
     <label class="search glass">${svg(P.search)}<input id="q" placeholder="Search moves" aria-label="Search moves" value="${esc(query)}"></label>
-    ${Object.entries(groups).map(([k, es]) => `<div class="list"><span class="label" style="padding:4px 6px">${esc(k)}</span>${es.map(e => {
-      return row(e, i++, enter).replace('class="row file', e.undone ? 'style="opacity:.45" class="row file' : 'class="row file');
-    }).join('')}</div>`).join('') || `<div class="empty">${svg(P.search, 1.6)}<span>No moves match.</span></div>`}`;
+    <div id="hlist" style="display:contents">${list()}</div>`;
   const qi = el.querySelector('#q');
-  qi.oninput = () => { query = qi.value; const pos = qi.selectionStart; redraw(); const n = $('q'); n.focus(); n.setSelectionRange(pos, pos); };
+  // only the list re-renders while typing; the box keeps focus and caret
+  qi.oninput = () => { query = qi.value; history(el, false); };
 }
 
 /* Settings */
@@ -340,7 +349,7 @@ function settings(el) {
       <div class="seg glass small" id="themeSeg" role="group" aria-label="Appearance">${[['system', 'System'], ['light', 'Light'], ['dark', 'Dark']].map(([k, n]) => `<button class="press" data-theme-pick="${k}" aria-pressed="${(s.theme || 'system') === k}">${n}</button>`).join('')}</div></div>
     <div style="display:flex;flex-direction:column;gap:6px"><span class="label">Folders</span>
       <div class="group glass">${sources().map(x => `<button class="set press" data-edit="${esc(x.path)}" style="--c:${colorOf(x)}"><span class="dot"></span><span class="grow">${esc(base(x.path))}</span>
-        <span class="val">${MODES.find(m => m[0] === x.mode)[1]}</span><span style="color:var(--fg3)">${svg(P.chevR)}</span></button>`).join('')}
+        <span class="val">${modeName(x)}</span><span style="color:var(--fg3)">${svg(P.chevR)}</span></button>`).join('')}
         <button class="set press" id="bAdd2" style="color:var(--fg2)">${svg(P.plus)}<span class="grow">Add a folder</span></button></div></div>
     <div style="display:flex;flex-direction:column;gap:6px"><span class="label">Sorting</span>
       <div class="group glass">
@@ -558,14 +567,14 @@ async function findDupes() {
       // never let a whole set be removed
       out.querySelectorAll('.group').forEach(gEl => { const cks = [...gEl.querySelectorAll('.ck')]; if (cks.every(c => c.checked)) cks[0].checked = false; });
       const n = out.querySelectorAll('.ck:checked').length;
-      go.disabled = !n; go.textContent = n ? `Move ${n} to Recycle Bin` : 'Pick copies to remove';
+      go.disabled = !n; go.textContent = n ? `Move ${n} to ${BIN}` : 'Pick copies to remove';
       return picked;
     };
     out.onchange = sync; sync();
     go.onclick = async () => {
       const paths = [...out.querySelectorAll('.ck:checked')].map(c => c.dataset.p);
       go.disabled = true;
-      try { await api.trashFiles(paths); closeSheet(); toast(`Moved ${paths.length} duplicate${paths.length > 1 ? 's' : ''} to the Recycle Bin`); load(); }
+      try { await api.trashFiles(paths); closeSheet(); toast(`Moved ${paths.length} duplicate${paths.length > 1 ? 's' : ''} to the ${BIN}`); load(); }
       catch (x) { toast(String(x)); go.disabled = false; }
     };
   });
@@ -580,7 +589,17 @@ $('bTop').onclick = async () => { if (!W) return; onTop = !onTop; await W.setAlw
 
 /* engine events */
 if (T) {
-  api.on('transfer://moved', async payload => { const e = JSON.parse(payload); fresh.add(e.id); await load(); toast(`${e.name} › ${L(e.line).name}`, e.id); });
+  // a burst of downloads becomes one refresh and one toast, not one per file
+  let burst = [], burstT = 0;
+  api.on('transfer://moved', payload => {
+    const e = JSON.parse(payload); fresh.add(e.id); burst.push(e);
+    clearTimeout(burstT);
+    burstT = setTimeout(async () => {
+      const b = burst; burst = [];
+      await load();
+      if (b.length === 1) toast(`${b[0].name} › ${L(b[0].line).name}`, b[0].id); else toast(`Sorted ${b.length} new files`);
+    }, 300);
+  });
   api.on('transfer://state', () => load());
   api.on('transfer://sweep', () => { location.hash = 'home'; sweep(); });
 }
@@ -647,8 +666,8 @@ function demoApi() {
       }));
       return R({ stats: {}, history: hist, settings, held, stale, pending, tiles });
     },
-    openPath: p => { toast(`Opens ${base(p)}${/\.[a-z0-9]+$/i.test(p) ? ' with its app' : ' in File Explorer'}`); return R(null); },
-    reveal: p => { toast(`Shows ${base(p)} in File Explorer`); return R(null); },
+    openPath: p => { toast(`Opens ${base(p)}${/\.[a-z0-9]+$/i.test(p) ? ' with its app' : ` in ${FILES}`}`); return R(null); },
+    reveal: p => { toast(`Shows ${base(p)} in ${FILES}`); return R(null); },
     moveTo: (path, line) => {
       const e = hist.find(x => !x.undone && x.to === path); if (e) e.undone = true;
       const src = settings.sources.find(s => within(path, s.path));

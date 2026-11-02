@@ -127,12 +127,13 @@ pub fn settings(st: &Settings) -> String {
     format!(
         r#"{{"sources":{},"confidence":{},"stale_installer_days":{},"settle_secs":{},"paused":{},"launch_at_login":{},"theme":{}}}"#,
         arr(&st.sources, |x| format!(
-            r#"{{"path":{},"mode":"{}","lines":{},"custom":{},"color":{}}}"#,
+            r#"{{"path":{},"mode":"{}","lines":{},"custom":{},"color":{},"online":{}}}"#,
             p(&x.path),
             x.mode.id(),
             arr(&x.lines, |l| s(l.id())),
             x.custom,
-            s(&x.color)
+            s(&x.color),
+            x.path.is_dir()
         )),
         st.confidence,
         st.stale_installer_days,
@@ -143,7 +144,11 @@ pub fn settings(st: &Settings) -> String {
     )
 }
 
-/// Everything the UI needs for a full refresh, in one payload.
+/// How many recent moves a refresh carries (the History screen's reach).
+pub const HISTORY: usize = 300;
+
+/// Everything the UI needs for a full refresh, in one payload. Cheap to build:
+/// verdicts for unchanged files come from the engine's cache.
 pub fn state(e: &crate::engine::Engine) -> String {
     let plans = e.plan_all(e.settings.settle_secs);
     let held: Vec<Held> = plans.iter().flat_map(|p| p.held.clone()).collect();
@@ -155,13 +160,11 @@ pub fn state(e: &crate::engine::Engine) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        r#"{{"stats":{},"history":{},"settings":{},"held":{},"stale":{},"lines":{},"pending":{{{}}},"tiles":{{{}}}}}"#,
-        stats(&e.stats()),
-        entries(&e.journal.recent(500)),
+        r#"{{"history":{},"settings":{},"held":{},"stale":{},"pending":{{{}}},"tiles":{{{}}}}}"#,
+        entries(&e.journal.recent(HISTORY)),
         settings(&e.settings),
         arr(&held, held_one),
         arr(&stale_v, stale),
-        lines(),
         pending,
         e.settings
             .sources
