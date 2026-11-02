@@ -57,6 +57,9 @@ pub fn start_with_interval(
         .spawn(move || {
             // path -> (last signature, when it last changed)
             let mut seen: HashMap<PathBuf, (Sig, Instant)> = HashMap::new();
+            // folders macOS (or anything else) refused us: don't knock again every tick,
+            // that is what made the permission prompt come back over and over
+            let mut denied: HashMap<PathBuf, Instant> = HashMap::new();
             while !stop2.load(Ordering::SeqCst) {
                 let (sources, settle, paused) = {
                     let e = engine.lock().unwrap();
@@ -66,7 +69,22 @@ pub fn start_with_interval(
                 if !paused {
                     let mut present = std::collections::HashSet::new();
                     for dir in &sources {
-                        let Ok(rd) = std::fs::read_dir(dir) else { continue };
+                        if denied.get(dir).is_some_and(|t| t.elapsed() < Duration::from_secs(600)) {
+                            continue;
+                        }
+                        let rd = match std::fs::read_dir(dir) {
+                            Ok(rd) => {
+                                denied.remove(dir);
+                                rd
+                            }
+                            Err(e) => {
+                                if e.kind() == std::io::ErrorKind::PermissionDenied {
+                                    denied.insert(dir.clone(), Instant::now());
+                                    on_event(WatchEvent::Failed(format!("no access to {} (allow it in System Settings > Privacy & Security > Files and Folders)", dir.display())));
+                                }
+                                continue;
+                            }
+                        };
                         for ent in rd.flatten() {
                             let path = ent.path();
                             let Ok(m) = std::fs::symlink_metadata(&path) else { continue };
