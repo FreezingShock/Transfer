@@ -7,8 +7,10 @@ use crate::lines::Line;
 use crate::model::Model;
 use crate::settings::Settings;
 use crate::signals::{self, ContentKind};
+use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::SystemTime;
 
 #[derive(Debug, Clone)]
@@ -59,7 +61,20 @@ pub struct Engine {
     pub settings: Settings,
     pub model: Model,
     pub journal: Journal,
+    /// Verdicts already worked out, so a refresh doesn't re-read every file.
+    cache: Mutex<HashMap<PathBuf, Cached>>,
 }
+
+/// A verdict stays valid while the file's size and mtime, the model and the
+/// threshold are unchanged.
+#[derive(Clone)]
+struct Cached {
+    key: (u64, Option<SystemTime>, u32, u32),
+    verdict: Verdict,
+    kind: ContentKind,
+}
+
+const CACHE_MAX: usize = 20_000;
 
 impl Engine {
     /// `TRANSFER_HOME` overrides the data folder (used by tests and the CLI demo).
@@ -76,6 +91,7 @@ impl Engine {
             model: Model::load(&home.join("model.tsv")),
             journal: Journal::open(&home.join("journal.tsv")),
             home,
+            cache: Mutex::new(HashMap::new()),
         })
     }
 
@@ -109,11 +125,16 @@ impl Engine {
         if meta.is_dir() {
             return false; // folders (and .app bundles) are left alone
         }
-        // never move the running app itself
-        if let Ok(me) = std::env::current_exe() {
-            if same_file(&me, path) {
+        // never move the running app itself (canonicalize only when the size matches)
+        if let Some((me, me_len)) = own_exe() {
+            if meta.len() == *me_len && std::fs::canonicalize(path).map(|p| &p == me).unwrap_or(false) {
                 return false;
             }
+        }
+        // cloud-only placeholders (OneDrive Files On-Demand, iCloud "optimize storage"):
+        // reading them would download them, so leave them alone
+        if crate::cloud::cloud_only(&meta) {
+            return false;
         }
         // Windows: hidden/system items (My Music, My Pictures, My Videos junctions,
         // desktop.ini, thumbnails) and any reparse point that targets a folder
@@ -142,8 +163,26 @@ impl Engine {
     }
 
     pub fn verdict(&self, path: &Path) -> io::Result<(Verdict, ContentKind, u64)> {
+        let meta = std::fs::symlink_metadata(path)?;
+        let key = (meta.len(), meta.modified().ok(), self.model.examples(), self.settings.confidence.to_bits());
+        if let Some(c) = self.cache.lock().unwrap().get(path) {
+            if c.key == key {
+                return Ok((c.verdict.clone(), c.kind, meta.len()));
+            }
+        }
         let f = signals::extract(path)?;
-        Ok((classify(&f, &self.model, self.settings.confidence), f.kind, f.size))
+        let v = classify(&f, &self.model, self.settings.confidence);
+        let mut cache = self.cache.lock().unwrap();
+        if cache.len() >= CACHE_MAX {
+            cache.clear();
+        }
+        cache.insert(path.to_path_buf(), Cached { key, verdict: v.clone(), kind: f.kind });
+        Ok((v, f.kind, f.size))
+    }
+
+    /// Forget verdicts for files that are gone (called after moves).
+    fn forget(&self, path: &Path) {
+        self.cache.lock().unwrap().remove(path);
     }
 
     pub fn plan(&self, dir: &Path, min_age_secs: u64) -> Plan {
@@ -240,6 +279,7 @@ impl Engine {
         via: &str,
     ) -> Result<Entry, String> {
         move_file(from, to).map_err(|e| format!("{}: {e}", from.display()))?;
+        self.forget(from);
         let e = Entry {
             id: self.journal.next_id(),
             ts: now(),
@@ -316,18 +356,16 @@ impl Engine {
     }
 
     /// Send stale installers to the OS Trash / Recycle Bin (recoverable).
-    /// Only files inside an Installers line folder are accepted.
+    /// Only files inside the Installers folder of a watched folder are accepted.
     pub fn trash(&self, paths: &[PathBuf]) -> Result<usize, String> {
-        let mut n = 0;
         for p in paths {
             let in_installers = p.parent().and_then(|d| d.file_name()).map(|d| d == Line::Installers.folder()).unwrap_or(false);
-            if !in_installers || !p.is_file() {
+            if !in_installers || crate::browse::owner(&self.settings, p).is_none() || !p.is_file() {
                 return Err(format!("refusing to trash {}", p.display()));
             }
-            to_trash(p).map_err(|e| format!("{}: {e}", p.display()))?;
-            n += 1;
         }
-        Ok(n)
+        crate::trash::to_trash(paths).map_err(|e| e.to_string())?;
+        Ok(paths.len())
     }
 
     /// Recycle-bin any files that belong to a watched folder (used by the
@@ -338,9 +376,7 @@ impl Engine {
                 return Err(format!("refusing to trash {}", p.display()));
             }
         }
-        for p in paths {
-            to_trash(p).map_err(|e| format!("{}: {e}", p.display()))?;
-        }
+        crate::trash::to_trash(paths).map_err(|e| e.to_string())?;
         Ok(paths.len())
     }
 
@@ -367,11 +403,15 @@ impl Engine {
 
 // -------------------------------------------------------------- fs helpers --
 
-fn same_file(a: &Path, b: &Path) -> bool {
-    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
-        (Ok(x), Ok(y)) => x == y,
-        _ => false,
-    }
+/// The running executable (canonical path, size), looked up once.
+fn own_exe() -> Option<&'static (PathBuf, u64)> {
+    static ME: OnceLock<Option<(PathBuf, u64)>> = OnceLock::new();
+    ME.get_or_init(|| {
+        let p = std::fs::canonicalize(std::env::current_exe().ok()?).ok()?;
+        let len = std::fs::metadata(&p).ok()?.len();
+        Some((p, len))
+    })
+    .as_ref()
 }
 
 /// exists() follows symlinks; a shortcut to a missing app still "exists" here.
@@ -395,28 +435,6 @@ fn with_suffix(p: &Path) -> PathBuf {
         .unwrap()
 }
 
-/// Native recycle bin via the OS's own tools (no third-party code).
-fn to_trash(p: &Path) -> io::Result<()> {
-    use std::process::Command;
-    let abs = std::fs::canonicalize(p)?;
-    let status = if cfg!(target_os = "macos") {
-        let script = format!(
-            "tell application \"Finder\" to delete POSIX file \"{}\"",
-            abs.display().to_string().replace('\\', "\\\\").replace('"', "\\\"")
-        );
-        Command::new("osascript").args(["-e", &script]).status()?
-    } else if cfg!(windows) {
-        let ps = format!(
-            "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('{}','OnlyErrorDialogs','SendToRecycleBin')",
-            abs.display().to_string().trim_start_matches(r"\\?\").replace('\'', "''")
-        );
-        Command::new("powershell").args(["-NoProfile", "-Command", &ps]).status()?
-    } else {
-        Command::new("gio").arg("trash").arg(&abs).status()?
-    };
-    if status.success() { Ok(()) } else { Err(io::Error::other("trash command failed")) }
-}
-
 fn move_file(from: &Path, to: &Path) -> io::Result<()> {
     if let Some(parent) = to.parent() {
         std::fs::create_dir_all(parent)?;
@@ -433,5 +451,88 @@ fn move_file(from: &Path, to: &Path) -> io::Result<()> {
             std::fs::remove_file(from)
         }
         Err(e) => Err(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::{Mode, Source};
+
+    fn temp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("transfer-engine-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn engine(root: &Path, dl: &Path) -> Engine {
+        let mut e = Engine::open(root.join(".h")).unwrap();
+        e.settings.sources = vec![Source::new(dl.to_path_buf(), Mode::Ask)];
+        e
+    }
+
+    #[test]
+    fn verdicts_are_cached_until_the_file_changes() {
+        let root = temp("cache");
+        let dl = root.join("Downloads");
+        std::fs::create_dir_all(&dl).unwrap();
+        let f = dl.join("notes");
+        std::fs::write(&f, b"%PDF-1.7\nhello").unwrap();
+        let e = engine(&root, &dl);
+        assert_eq!(e.verdict(&f).unwrap().0.line, Line::Docs);
+        assert_eq!(e.cache.lock().unwrap().len(), 1);
+        // same size and mtime: the cached verdict is reused
+        assert_eq!(e.verdict(&f).unwrap().0.line, Line::Docs);
+        // new content (different size): re-read
+        std::fs::write(&f, b"\x89PNG\r\n\x1a\n and then some more bytes").unwrap();
+        assert_eq!(e.verdict(&f).unwrap().0.line, Line::Images);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn moves_forget_cached_verdicts() {
+        let root = temp("forget");
+        let dl = root.join("Downloads");
+        std::fs::create_dir_all(&dl).unwrap();
+        std::fs::write(dl.join("a.pdf"), b"%PDF-1.7\nx").unwrap();
+        let mut e = engine(&root, &dl);
+        let plan = e.plan(&dl, 0);
+        assert_eq!(plan.moves.len(), 1);
+        let done = e.apply(&plan.moves, "sweep");
+        assert!(done[0].is_ok());
+        assert!(dl.join("Docs/a.pdf").exists());
+        assert!(e.cache.lock().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn trash_only_takes_installers_inside_watched_folders() {
+        let root = temp("trash");
+        let dl = root.join("Downloads");
+        let elsewhere = root.join("Elsewhere/Installers");
+        std::fs::create_dir_all(dl.join("Installers")).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("x.exe"), b"MZ").unwrap();
+        std::fs::write(dl.join("loose.exe"), b"MZ").unwrap();
+        let e = engine(&root, &dl);
+        assert!(e.trash(&[elsewhere.join("x.exe")]).is_err(), "Installers folder outside a watched folder");
+        assert!(e.trash(&[dl.join("loose.exe")]).is_err(), "not in Installers");
+        assert!(elsewhere.join("x.exe").exists() && dl.join("loose.exe").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn settings_keep_offline_folders_and_save_atomically() {
+        let root = temp("settings");
+        let file = root.join("settings.txt");
+        let mut s = Settings::default();
+        s.sources = vec![Source::new(PathBuf::from("/nowhere/unplugged/Stuff"), Mode::Auto)];
+        s.save(&file).unwrap();
+        assert!(!root.join("settings.tmp").exists());
+        let back = Settings::load(&file);
+        assert_eq!(back.sources.len(), 1);
+        assert_eq!(back.sources[0].path, PathBuf::from("/nowhere/unplugged/Stuff"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

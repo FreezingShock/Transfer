@@ -1,18 +1,41 @@
 name: Build Transfer
 
-# Every push to main builds Windows and macOS (a compile check + downloadable
-# artifacts). A Release is published only when the version in
-# src-tauri/tauri.conf.json is new, and only after BOTH platforms succeed, so a
-# release always carries the Windows .exe/.msi and the macOS .dmg together.
+# Every push to main (and every pull request) runs the engine tests and the UI
+# CSP check, and builds Windows and macOS. A Release is published only from
+# main, only when the version in src-tauri/tauri.conf.json is new, and only
+# after the tests AND both platforms succeed, so a release always carries the
+# Windows .exe/.msi and the macOS .dmg together.
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Version is the same in all three places
+        run: |
+          A=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          B=$(node -p "require('./package.json').version")
+          C=$(grep -m1 '^version' src-tauri/Cargo.toml | cut -d'"' -f2)
+          echo "tauri.conf.json=$A package.json=$B Cargo.toml=$C"
+          test "$A" = "$B" && test "$A" = "$C"
+      - name: Engine tests
+        run: cargo test --workspace
+      - name: UI renders its colors under the app CSP
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.49.1
+          npx playwright install --with-deps chromium
+          node tools/ui-csp-check.js
+
   windows:
     runs-on: windows-latest
     steps:
@@ -24,7 +47,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
-      - run: npm install
+      - run: npm ci
       - run: npx tauri build
       - name: Portable exe (no installer)
         shell: bash
@@ -51,7 +74,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
-      - run: npm install
+      - run: npm ci
       # one .dmg for both Apple Silicon and Intel Macs
       - run: npx tauri build --target universal-apple-darwin
       - uses: actions/upload-artifact@v4
@@ -61,8 +84,8 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [windows, macos]
-    if: github.ref == 'refs/heads/main'
+    needs: [test, windows, macos]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

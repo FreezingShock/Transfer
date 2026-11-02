@@ -37,10 +37,13 @@ fn line(s: &str) -> Result<Line, String> {
 }
 
 // ------------------------------------------------------------- commands ----
+//
+// Every command is async, so Tauri runs it on a worker thread instead of the
+// main (window) thread: a slow disk or a long move never freezes the window.
 
 #[tauri::command]
-fn get_state(app: State<App>) -> String {
-    json::state(&app.eng.lock().unwrap())
+async fn get_state(app: State<'_, App>) -> Res {
+    Ok(json::state(&app.eng.lock().unwrap()))
 }
 
 /// The plans for one watched folder, or every folder a sweep covers.
@@ -59,19 +62,19 @@ fn plans_for(e: &Engine, source: &Option<String>) -> Vec<transfer_core::Plan> {
 
 /// Dry run. Moves nothing.
 #[tauri::command]
-fn plan(app: State<App>, source: Option<String>) -> String {
-    json::plans(&plans_for(&app.eng.lock().unwrap(), &source))
+async fn plan(app: State<'_, App>, source: Option<String>) -> Res {
+    Ok(json::plans(&plans_for(&app.eng.lock().unwrap(), &source)))
 }
 
 #[tauri::command]
-fn apply(app: State<App>, source: Option<String>) -> String {
+async fn apply(app: State<'_, App>, source: Option<String>) -> Res {
     let mut e = app.eng.lock().unwrap();
     let moves: Vec<_> = plans_for(&e, &source).into_iter().flat_map(|p| p.moves).collect();
     let done: Vec<_> = e.apply(&moves, "sweep").into_iter().filter_map(Result::ok).collect();
-    json::entries(&done)
+    Ok(json::entries(&done))
 }
 
-/// Native folder picker. Runs off the main thread (async command).
+/// Native folder picker.
 #[tauri::command]
 async fn pick_folder(handle: AppHandle) -> Option<String> {
     let picked = handle.dialog().file().set_title("Choose a folder for Transfer to watch").blocking_pick_folder()?;
@@ -79,18 +82,18 @@ async fn pick_folder(handle: AppHandle) -> Option<String> {
 }
 
 #[tauri::command]
-fn undo(app: State<App>, id: u64) -> Res {
+async fn undo(app: State<'_, App>, id: u64) -> Res {
     app.eng.lock().unwrap().undo(id).map(|e| json::entry(&e))
 }
 
 #[tauri::command]
-fn correct(app: State<App>, id: u64, line: String) -> Res {
+async fn correct(app: State<'_, App>, id: u64, line: String) -> Res {
     let l = self::line(&line)?;
     app.eng.lock().unwrap().correct(id, l).map(|e| json::entry(&e))
 }
 
 #[tauri::command]
-fn route(app: State<App>, path: String, line: String) -> Res {
+async fn route(app: State<'_, App>, path: String, line: String) -> Res {
     let l = self::line(&line)?;
     let mut e = app.eng.lock().unwrap();
     // only files that sit directly in a watched folder can be routed
@@ -115,7 +118,7 @@ fn watched(e: &Engine, path: &str) -> Result<(PathBuf, bool), String> {
 }
 
 #[tauri::command]
-fn open_path(handle: AppHandle, app: State<App>, path: String) -> Result<(), String> {
+async fn open_path(handle: AppHandle, app: State<'_, App>, path: String) -> Result<(), String> {
     let (p, is_folder) = watched(&app.eng.lock().unwrap(), &path)?;
     // a sorted folder that doesn't exist yet: make it so Explorer has something to open
     if is_folder && !p.exists() {
@@ -125,39 +128,39 @@ fn open_path(handle: AppHandle, app: State<App>, path: String) -> Result<(), Str
 }
 
 #[tauri::command]
-fn reveal(handle: AppHandle, app: State<App>, path: String) -> Result<(), String> {
+async fn reveal(handle: AppHandle, app: State<'_, App>, path: String) -> Result<(), String> {
     let (p, _) = watched(&app.eng.lock().unwrap(), &path)?;
     handle.opener().reveal_item_in_dir(p).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn move_to(app: State<App>, path: String, line: String) -> Res {
+async fn move_to(app: State<'_, App>, path: String, line: String) -> Res {
     let l = self::line(&line)?;
     app.eng.lock().unwrap().move_to(&PathBuf::from(path), l).map(|e| json::entry(&e))
 }
 
 #[tauri::command]
-fn search(app: State<App>, query: String) -> String {
+async fn search(app: State<'_, App>, query: String) -> Res {
     let settings = app.eng.lock().unwrap().settings.clone();
-    json::files(&browse::search(&settings, &query, 60))
+    Ok(json::files(&browse::search(&settings, &query, 60)))
 }
 
-/// Can read every candidate file, so it runs off the UI thread and without
-/// holding the engine lock (the watcher keeps working meanwhile).
+/// Can read every candidate file, so it runs without holding the engine lock
+/// (the watcher keeps working meanwhile).
 #[tauri::command]
-async fn duplicates(app: State<'_, App>) -> Result<String, String> {
+async fn duplicates(app: State<'_, App>) -> Res {
     let settings = app.eng.lock().unwrap().settings.clone();
     Ok(json::duplicates(&browse::duplicates(&settings)))
 }
 
 #[tauri::command]
-fn trash_files(app: State<App>, paths: Vec<String>) -> Result<usize, String> {
+async fn trash_files(app: State<'_, App>, paths: Vec<String>) -> Result<usize, String> {
     let p: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
     app.eng.lock().unwrap().trash_watched(&p)
 }
 
 #[tauri::command]
-fn trash(app: State<App>, paths: Vec<String>) -> Result<usize, String> {
+async fn trash(app: State<'_, App>, paths: Vec<String>) -> Result<usize, String> {
     let p: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
     app.eng.lock().unwrap().trash(&p)
 }
@@ -185,14 +188,16 @@ struct SettingsDto {
 }
 
 #[tauri::command]
-fn save_settings(handle: AppHandle, app: State<App>, settings: SettingsDto) -> Result<(), String> {
+async fn save_settings(handle: AppHandle, app: State<'_, App>, settings: SettingsDto) -> Result<(), String> {
     {
         let mut e = app.eng.lock().unwrap();
         let s = &mut e.settings;
         s.sources = settings
             .sources
             .into_iter()
-            .filter(|x| PathBuf::from(&x.path).is_dir())
+            // keep folders that are offline right now (unplugged drive, network share):
+            // dropping them here would forget them for good
+            .filter(|x| !x.path.trim().is_empty())
             .map(|x| Source {
                 path: PathBuf::from(x.path),
                 mode: Mode::parse(&x.mode),
@@ -241,6 +246,27 @@ fn refresh_tray_label(app: &AppHandle) {
     if let Some(item) = app.try_state::<MenuItem<tauri::Wry>>() {
         let _ = item.set_text(if paused { "Resume sorting" } else { "Pause sorting" });
     }
+}
+
+/// Windows build number (22000+ is Windows 11). RtlGetVersion isn't subject to
+/// the compatibility shims that make GetVersionEx lie.
+#[cfg(windows)]
+fn windows_build() -> u32 {
+    #[repr(C)]
+    struct OsVersionInfoW {
+        size: u32,
+        major: u32,
+        minor: u32,
+        build: u32,
+        platform: u32,
+        csd: [u16; 128],
+    }
+    #[link(name = "ntdll")]
+    extern "system" {
+        fn RtlGetVersion(info: *mut OsVersionInfoW) -> i32;
+    }
+    let mut v = OsVersionInfoW { size: std::mem::size_of::<OsVersionInfoW>() as u32, major: 0, minor: 0, build: 0, platform: 0, csd: [0; 128] };
+    if unsafe { RtlGetVersion(&mut v) } == 0 { v.build } else { 0 }
 }
 
 // ------------------------------------------------------------- main --------
@@ -315,6 +341,15 @@ fn main() {
                     _ => {}
                 })
                 .build(app)?;
+
+            // Windows 11: Mica is the native backdrop (acrylic lags while dragging there)
+            #[cfg(windows)]
+            if windows_build() >= 22000 {
+                if let Some(w) = app.get_webview_window("main") {
+                    use tauri::window::{Effect, EffectsBuilder};
+                    let _ = w.set_effects(EffectsBuilder::new().effect(Effect::Mica).build());
+                }
+            }
 
             // first launch registers launch-at-login if the setting is on
             if eng.lock().unwrap().settings.launch_at_login {

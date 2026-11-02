@@ -69,14 +69,18 @@ fn info(path: PathBuf, m: &std::fs::Metadata, line: Option<Line>) -> FileInfo {
 
 /// Every file Transfer can see: the top of each watched folder plus its sorted folders.
 pub fn all_files(settings: &Settings) -> Vec<FileInfo> {
+    all_files_meta(settings).into_iter().map(|(f, _)| f).collect()
+}
+
+fn all_files_meta(settings: &Settings) -> Vec<(FileInfo, bool)> {
     let mut out = Vec::new();
     for s in &settings.sources {
         for (p, m) in files_in(&s.path) {
-            out.push(info(p, &m, None));
+            out.push((info(p, &m, None), crate::cloud::cloud_only(&m)));
         }
         for line in Line::ALL {
             for (p, m) in files_in(&s.path.join(line.folder())) {
-                out.push(info(p, &m, Some(line)));
+                out.push((info(p, &m, Some(line)), crate::cloud::cloud_only(&m)));
             }
         }
     }
@@ -142,8 +146,9 @@ fn same_bytes(a: &Path, b: &Path) -> bool {
 /// confirmed with a byte comparison, so a group is never a guess.
 pub fn duplicates(settings: &Settings) -> Vec<Vec<FileInfo>> {
     let mut by_size: HashMap<u64, Vec<FileInfo>> = HashMap::new();
-    for f in all_files(settings) {
-        if f.size >= 1024 && !matches!(f.line, Some(Line::Shortcuts)) {
+    // cloud-only files are skipped: hashing them would download them
+    for (f, cloud) in all_files_meta(settings) {
+        if !cloud && f.size >= 1024 && !matches!(f.line, Some(Line::Shortcuts)) {
             by_size.entry(f.size).or_default().push(f);
         }
     }

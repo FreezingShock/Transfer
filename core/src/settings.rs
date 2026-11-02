@@ -67,14 +67,10 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        let sources = [user_dir("Desktop"), user_dir("Downloads"), user_dir("Documents")]
+        // Documents holds things people placed on purpose: ask first by default
+        let sources = [("Desktop", Mode::Auto), ("Downloads", Mode::Auto), ("Documents", Mode::Ask)]
             .into_iter()
-            .flatten()
-            .map(|path| {
-                // Documents holds things people placed on purpose: ask first by default
-                let mode = if path.ends_with("Documents") { Mode::Ask } else { Mode::Auto };
-                Source::new(path, mode)
-            })
+            .filter_map(|(name, mode)| Some(Source::new(user_dir(name)?, mode)))
             .collect();
         Settings {
             sources,
@@ -125,7 +121,25 @@ impl Settings {
         if s.sources.is_empty() {
             s.sources = Settings::default().sources;
         }
+        s.relocate_known_folders();
         s
+    }
+
+    /// Settings saved before Transfer asked Windows where Desktop/Documents/Downloads
+    /// really are pointed at `%USERPROFILE%\Desktop` etc. If OneDrive (or the user)
+    /// moved the folder, follow it.
+    fn relocate_known_folders(&mut self) {
+        let Some(h) = home() else { return };
+        for name in ["Desktop", "Downloads", "Documents"] {
+            let Some(real) = known_folder(name) else { continue };
+            let legacy = h.join(name);
+            if real == legacy || !real.is_dir() || self.sources.iter().any(|s| s.path == real) {
+                continue;
+            }
+            if let Some(src) = self.sources.iter_mut().find(|s| !s.custom && s.path == legacy) {
+                src.path = real;
+            }
+        }
     }
 
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
@@ -144,7 +158,10 @@ impl Settings {
             "confidence = {}\nstale_installer_days = {}\nsettle_secs = {}\npaused = {}\nlaunch_at_login = {}\ntheme = {}\n",
             self.confidence, self.stale_installer_days, self.settle_secs, self.paused, self.launch_at_login, self.theme
         );
-        std::fs::write(path, out)
+        // write then rename, so a crash mid-save never leaves a half-written file
+        let tmp = path.with_extension("tmp");
+        std::fs::write(&tmp, out)?;
+        std::fs::rename(tmp, path)
     }
 
     /// Folders the live watcher sorts (mode Auto).
@@ -168,11 +185,51 @@ pub fn home() -> Option<PathBuf> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from)
 }
 
-/// ~/Desktop, ~/Downloads, ~/Documents (same names on macOS and Windows
-/// unless the user has relocated them; the app lets you re-pick).
+/// Desktop, Downloads, Documents. On Windows the OS is asked where they really
+/// are (OneDrive and "Move" in folder properties relocate them); on macOS they
+/// are always ~/Desktop etc., even with iCloud Desktop & Documents.
 fn user_dir(name: &str) -> Option<PathBuf> {
-    let p = home()?.join(name);
+    let p = known_folder(name).filter(|p| p.is_dir()).or_else(|| home().map(|h| h.join(name)))?;
     p.is_dir().then_some(p)
+}
+
+#[cfg(windows)]
+pub fn known_folder(name: &str) -> Option<PathBuf> {
+    use std::ffi::{c_void, OsString};
+    use std::os::windows::ffi::OsStringExt;
+
+    #[repr(C)]
+    struct Guid(u32, u16, u16, [u8; 8]);
+    #[link(name = "shell32")]
+    extern "system" {
+        fn SHGetKnownFolderPath(id: *const Guid, flags: u32, token: *mut c_void, out: *mut *mut u16) -> i32;
+    }
+    #[link(name = "ole32")]
+    extern "system" {
+        fn CoTaskMemFree(p: *mut c_void);
+    }
+    let id = match name {
+        "Desktop" => Guid(0xB4BFCC3A, 0xDB2C, 0x424C, [0xB0, 0x29, 0x7F, 0xE9, 0x9A, 0x87, 0xC6, 0x41]),
+        "Downloads" => Guid(0x374DE290, 0x123F, 0x4565, [0x91, 0x64, 0x39, 0xC4, 0x92, 0x5E, 0x46, 0x7B]),
+        "Documents" => Guid(0xFDD39AD0, 0x238F, 0x46AF, [0xAD, 0xB4, 0x6C, 0x85, 0x48, 0x03, 0x69, 0xC7]),
+        _ => return None,
+    };
+    let mut out: *mut u16 = std::ptr::null_mut();
+    let hr = unsafe { SHGetKnownFolderPath(&id, 0, std::ptr::null_mut(), &mut out) };
+    let path = if hr == 0 && !out.is_null() {
+        let len = (0..).take_while(|&i| unsafe { *out.add(i) } != 0).count();
+        let wide = unsafe { std::slice::from_raw_parts(out, len) };
+        Some(PathBuf::from(OsString::from_wide(wide)))
+    } else {
+        None
+    };
+    unsafe { CoTaskMemFree(out as *mut c_void) };
+    path
+}
+
+#[cfg(not(windows))]
+pub fn known_folder(_name: &str) -> Option<PathBuf> {
+    None
 }
 
 /// Per-user app data folder.
