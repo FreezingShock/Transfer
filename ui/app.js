@@ -512,7 +512,7 @@ let tt;
 function toast(msg, undoId) {
   const old = document.querySelector('.toast'); if (old) old.remove(); clearTimeout(tt);
   const t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status');
-  t.innerHTML = `<span>${esc(msg)}</span>${undoId ? '<button class="press">Undo</button>' : ''}`;
+  t.innerHTML = `<i class="td" aria-hidden="true"></i><span>${esc(msg)}</span>${undoId ? '<button class="press">Undo</button>' : ''}`;
   $('win').appendChild(t); gel(t);
   if (undoId) t.querySelector('button').onclick = async () => { await api.undo(undoId); t.remove(); load(); };
   tt = setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 200); }, 3800);
