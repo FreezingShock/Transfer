@@ -80,7 +80,6 @@ const api = T ? {
 let S = null, folder = null, query = '', openHeld = 0, openMove = null, trashAsk = false, shown = 0;
 const fresh = new Set();
 const TABS = [['home', 'Home'], ['review', 'Review'], ['history', 'History'], ['settings', 'Settings']];
-let modeUI = 'bar'; /* prototype: 'bar' | 'chip' | 'sheet' */
 const cur = () => { const h = location.hash.slice(1); return TABS.some(t => t[0] === h) ? h : 'home'; };
 let lastTab = cur();
 const sources = () => S.settings.sources;
@@ -299,12 +298,9 @@ function home(el, enter) {
   } else {
     const off = s.mode === 'off', offline = s.online === false;
     const sub = offline ? 'This folder is offline. Plug the drive back in.' : off ? 'Not watched' : `${today} sorted today`;
-    const chip = modeUI === 'chip' ? `<button class="glass press chipmode ${s.mode}" id="bChip" aria-haspopup="menu"><i></i>${MODES.find(m => m[0] === s.mode)[1]}${svg(P.chevD, 2.2)}</button>`
-      : modeUI === 'sheet' ? `<button class="glass press live icon-btn" id="bGear" aria-label="Folder settings" title="Folder settings">${svg(P.settings, 1.8)}</button>` : '';
+    const chip = `<button class="glass press chipmode ${s.mode}" id="bChip" aria-haspopup="menu" aria-label="Mode: ${MODES.find(m => m[0] === s.mode)[1]}"><i></i>${MODES.find(m => m[0] === s.mode)[1]}${svg(P.chevD, 2.2)}</button>`;
     html += `<div class="head"><div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span class="h1">${esc(base(s.path))}</span>
-      <span class="sub">${sub}${modeUI === 'sheet' ? ` · ${MODES.find(m => m[0] === s.mode)[1]}` : ''}</span></div>${chip ? `<div class="tools">${chip}</div>` : ''}</div>
-      ${modeUI === 'bar' ? `<div class="seg glass small" id="modeSeg" role="group" aria-label="Mode">${MODES.map(([m, n]) => `<button class="press" data-mode="${m}" aria-pressed="${s.mode === m}">${n}</button>`).join('')}</div>
-      <span class="sub" style="padding:0 6px;margin-top:-6px">${MODE_HELP[s.mode]}</span>` : ''}
+      <span class="sub">${sub}</span></div><div class="tools">${chip}</div></div>
       ${tilesHtml(s)}${attention()}`;
     const recent = live.slice(0, 6);
     feed = recent.length ? `<div class="list"><span class="hour">Recent</span>${recent.map((e, i) => row(e, i, enter)).join('')}</div>` + (live.length > 6 ? `<a class="more press ghost glass" href="#history">All activity</a>` : '')
@@ -313,16 +309,8 @@ function home(el, enter) {
   el.innerHTML = html + feed;
   el.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => { folder = b.dataset.pick; go('f'); });
   el.querySelectorAll('[data-go]').forEach(b => b.onclick = () => { location.hash = b.dataset.go; });
-  el.querySelectorAll('[data-sweep]').forEach(b => b.onclick = () => { if (!folder) { folder = b.dataset.sweep; } sweep(); });
-  const ms = el.querySelector('#modeSeg');
-  if (ms) {
-    requestAnimationFrame(() => moveInd(ms, ms.querySelector('[aria-pressed=true]'), false));
-    ms.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
-      ms.querySelectorAll('[data-mode]').forEach(x => x.setAttribute('aria-pressed', x === b)); moveInd(ms, b); setMode(s, b.dataset.mode);
-    });
-  }
+  el.querySelectorAll('[data-sweep]').forEach(b => b.onclick = () => sweep(b.dataset.sweep));
   const chip = el.querySelector('#bChip'); if (chip) chip.onclick = e => { e.stopPropagation(); modeMenu(chip, s); };
-  const gear = el.querySelector('#bGear'); if (gear) gear.onclick = () => editFolder(s.path);
   const t = el.querySelector('#bTrash');
   if (t) t.onclick = async () => {
     if (!trashAsk) { trashAsk = true; return redraw(); }
@@ -435,13 +423,14 @@ function closeSheet() {
 }
 addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
 
-async function sweep() {
-  const plans = await api.plan(folder);
+async function sweep(only) {
+  const target = only === undefined ? folder : only;
+  const plans = await api.plan(target);
   const moves = plans.flatMap(p => p.moves);
   const by = {}; moves.forEach(m => (by[m.line] = by[m.line] || []).push(m));
   const order = LINES.filter(l => by[l.id]);
   let open = order[0] && order[0].id;
-  const where = folder ? base(folder) : 'all folders';
+  const where = target ? base(target) : 'all folders';
   const draw = sh => {
     sh.innerHTML = `<span class="grip" aria-hidden="true"></span>
       <div style="display:flex;flex-direction:column;gap:2px;padding:0 4px"><span class="h1">Sweep ${esc(where)}</span>
@@ -455,7 +444,7 @@ async function sweep() {
     sh.querySelectorAll('[data-close]').forEach(b => b.onclick = closeSheet);
     sh.querySelectorAll('[data-g]').forEach(b => b.onclick = () => { open = open === b.dataset.g ? null : b.dataset.g; draw(sh); });
     const y = sh.querySelector('#sYes');
-    if (y) y.onclick = async () => { y.disabled = true; const done = await api.apply(folder); done.forEach(e => fresh.add(e.id)); closeSheet(); toast(`Moved ${done.length} file${done.length === 1 ? '' : 's'}`); load(); };
+    if (y) y.onclick = async () => { y.disabled = true; const done = await api.apply(target); done.forEach(e => fresh.add(e.id)); closeSheet(); toast(`Moved ${done.length} file${done.length === 1 ? '' : 's'}`); load(); };
   };
   sheet('', draw);
 }
@@ -500,7 +489,7 @@ async function addFolder() {
 
 /* ---------- shared ---------- */
 $('bLive').onclick = async () => { S.settings.paused = !S.settings.paused; await api.saveSettings(S.settings); chrome(); toast(S.settings.paused ? 'Paused. Nothing will move.' : 'Sorting again'); };
-$('bSweep').onclick = sweep;
+$('bSweep').onclick = () => sweep();
 $('view').addEventListener('click', async ev => {
   const u = ev.target.closest('[data-undo]'); if (!u) return;
   ev.stopPropagation();
@@ -650,21 +639,7 @@ if (T) {
 addEventListener('resize', () => chrome(false));
 load('f');
 
-/* prototype-only controls */
-$('dMode').onclick = () => { modeUI = { bar: 'chip', chip: 'sheet', sheet: 'bar' }[modeUI]; $('dMode').textContent = 'Mode control: ' + { bar: 'Bar', chip: 'Chip', sheet: 'Sheet' }[modeUI]; closeMenu(); redraw(); };
-/* tray popover: the left-click view of the tray icon (prototype of the real mini window) */
-$('dTray').onclick = () => {
-  const old = document.querySelector('.pop'); if (old) { old.remove(); return; }
-  const live = S.history.filter(e => !e.undone).slice(0, 5);
-  const p = document.createElement('div'); p.className = 'pop'; p.setAttribute('role', 'dialog'); p.setAttribute('aria-label', 'Transfer tray');
-  p.innerHTML = `<div class="ph"><b style="font-size:15px">Transfer</b><label class="live glass" style="cursor:pointer"><i></i><span>${S.settings.paused ? 'Paused' : 'Live'}</span><input type="checkbox" class="sw" style="width:34px;height:20px" ${S.settings.paused ? '' : 'checked'} aria-label="Sorting on"></label></div>
-    <div class="list">${live.map(e => `<div class="row">${icon(e.line)}<div class="txt"><b>${esc(e.name)}</b><span>${esc(base(parts(e.from).slice(0, -1).join('/')))} › ${esc(L(e.line).name)}</span></div><span class="when">${ago(e.ts)}</span></div>`).join('')}</div>
-    <div class="pb"><button class="btn ghost press">Sweep now</button><button class="btn acc press">Open Transfer</button></div>`;
-  document.body.appendChild(p); gel(p);
-  p.querySelector('input').onchange = e => { S.settings.paused = !e.target.checked; p.querySelector('.live span').textContent = S.settings.paused ? 'Paused' : 'Live'; api.saveSettings(S.settings); chrome(); };
-  p.querySelector('.ghost').onclick = () => { p.remove(); sweep(); };
-  p.querySelector('.acc').onclick = () => p.remove();
-};
+/* demo-only controls (hidden in the app) */
 $('dWall').onclick = () => $('wall').classList.toggle('blue');
 $('dFile').onclick = () => api._simulate && api._simulate();
 

@@ -13,7 +13,7 @@ Read this before changing anything. Keep it current when a decision changes.
 | `core/` | `transfer-core`: classifier, planner, mover, undo journal, local learner, watcher, browse (tiles/search/duplicates), cloud-placeholder check, OS trash. **std only, zero dependencies, no network code.** Keep it that way. OS calls go through small `extern` blocks (`getxattr`, `SHGetKnownFolderPath`, `SHFileOperationW`, `NSFileManager`), not crates. |
 | `cli/` | `transfer` binary on the same engine. `plan`, `apply`, `watch`, `history`, `undo`, `correct`, `route`, `move`, `search`, `dupes`, `explain`, `state`. Fastest way to test engine changes. |
 | `src-tauri/` | Desktop shell: window, tray, commands, plugins (autostart, dialog, opener, notification, all called from Rust only). Excluded from the root workspace; builds via `npx tauri build`. |
-| `ui/` | `index.html` (all CSS) + `app.js` (all logic). Runs in the app, or in a plain browser on built-in demo data (`demoApi()`). |
+| `ui/` | `index.html` (all CSS) + `app.js` (all logic). Runs in the app, or in a plain browser on built-in demo data (`demoApi()`). `tray.html` + `tray.js` = the tray popover (second window, label `tray`, built lazily on first tray click, own capability `capabilities/tray.json`). |
 | `demo/make_mess.py` | Builds a fake messy Desktop/Downloads/Documents with real file signatures. |
 | `tools/ui-csp-check.js` | Renders the UI under the app's real CSP; exits 1 if inline styles get blocked. Runs in CI. |
 | `docs/smoke-test.md` | Manual checklist per OS. Run on real hardware before announcing a release. |
@@ -110,16 +110,17 @@ Experimental UI work goes on a branch (`ui-*`) so `main` never references comman
 
 ## Open items
 
-- **v0.5 (in progress, prototype on branch `claude/project-thread-kcuw62`):** Nathan's picks (2026-11-02): all eight folder
-  tiles always shown; All view = today's number + folder cards + one activity feed grouped by hour; a "needs attention"
-  list (review, ask-first waiting, old installers); toasts arrive without overshoot; tray popover as a 320 px mini window
-  if it stays light; mode control is Bar / Chip / Sheet pending his choice (Bar looked nicest, he wants to compare).
-  Still to build: first-run walkthrough (pick folders → pick modes → dry run before anything moves) and the real tray popover.
+- **v0.5.0 (shipped 2026-11-02):** Nathan's picks: all eight folder tiles always shown (off ones dimmed); All view = today's number +
+  folder cards + "needs attention" list (review, ask-first waiting, old installers) + one hourly activity feed; labeled tabs; Settings hints;
+  toasts/menus arrive without overshoot; toast is tinted glass; `.acc` buttons (Sweep) are colored liquid glass. **Mode control is the Chip**
+  (pill by the folder name, opens a menu: Auto / Ask first / Off / "Choose file types…"); Nathan chose it over the Bar. Don't re-add Bar/Sheet variants.
+  Tray left-click opens a 320 px popover (Live toggle, today's count, last 4 moves, Sweep now, Open); right-click keeps the menu. It hides on blur;
+  `POP_HIDDEN_AT` stops the tray click that follows the blur from reopening it. The window is built off the event thread (Windows deadlock risk) and kept hidden afterward.
+  Still to build: first-run walkthrough (pick folders → pick modes → dry run before anything moves). Popover and chip untested on real Windows/Mac.
 - **Misfile resolved (2026-11-02):** the `.hdr`, `.bin`, `.blend` and `.woff2` files in Code on Nathan's PC were moved there by him, not by the engine (it holds them for Review).
 - **Not yet tested on a real Mac:** folder permissions, native Trash (`NSFileManager`, Finder fallback), notifications, vibrancy.
   v0.4.2's Windows FFI (known folders, `SHFileOperationW`, Mica, cloud attrs) type-checks but hadn't run on Windows either.
-- **Roadmap** (2026-11-02 review): phases 1-2 shipped in v0.4.2. Next: v0.5 UI after Nathan answers the five taste
-  questions; JSON/glTF text currently routes to Code (braces look like code); `--gel`/`gel()` still overshoot slightly.
+- **Roadmap** (2026-11-02 review): phases 1-2 shipped in v0.4.2. Next: first-run walkthrough; JSON/glTF text currently routes to Code (braces look like code); `--gel`/`gel()` still overshoot slightly.
 - **Windows notifications** may not show for the portable exe (no registered app id); the installer fixes that.
 - Watcher polls every 2 s (a failing move retries once a minute); switch the shell to native file events if many folders are added.
 - Code signing (Windows certificate; Apple Developer ID + notarization) and auto-updates before sharing publicly.

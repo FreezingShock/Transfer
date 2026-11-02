@@ -14,7 +14,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::window::{Effect, EffectState, EffectsBuilder};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use transfer_core::engine::Engine;
 use tauri_plugin_dialog::DialogExt;
@@ -224,6 +227,100 @@ async fn save_settings(handle: AppHandle, app: State<'_, App>, settings: Setting
 
 // ------------------------------------------------------------- tray --------
 
+#[tauri::command]
+async fn toggle_pause(handle: AppHandle) -> Result<(), String> {
+    toggle_pause_inner(&handle);
+    Ok(())
+}
+
+/// Buttons on the tray popover: open the window, sweep, or just close.
+#[tauri::command]
+async fn tray_action(handle: AppHandle, action: String) -> Result<(), String> {
+    hide_popover(&handle);
+    match action.as_str() {
+        "open" => show(&handle),
+        "sweep" => {
+            show(&handle);
+            let _ = handle.emit("transfer://sweep", ());
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+const POP_W: f64 = 320.0;
+const POP_H: f64 = 400.0;
+/// When the popover last hid itself. A tray click lands right after the blur that hides it;
+/// without this the click would reopen it, so it could never be closed with the icon.
+static POP_HIDDEN_AT: AtomicU64 = AtomicU64::new(0);
+fn now_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+fn hide_popover(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("tray") {
+        if w.is_visible().unwrap_or(false) {
+            let _ = w.hide();
+            POP_HIDDEN_AT.store(now_ms(), Ordering::Relaxed);
+        }
+    }
+}
+
+/// Left-click on the tray icon: a 320 px mini window next to the icon (below it on a top
+/// menu bar, above it on a bottom taskbar). Built lazily on first use, off the event thread
+/// (building a webview on the thread that handles tray events can deadlock on Windows).
+fn toggle_popover(app: &AppHandle, click: PhysicalPosition<f64>) {
+    if let Some(w) = app.get_webview_window("tray") {
+        if w.is_visible().unwrap_or(false) {
+            hide_popover(app);
+            return;
+        }
+    }
+    if now_ms().saturating_sub(POP_HIDDEN_AT.load(Ordering::Relaxed)) < 300 {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let w = match app.get_webview_window("tray") {
+            Some(w) => w,
+            None => {
+                let built = WebviewWindowBuilder::new(&app, "tray", WebviewUrl::App("tray.html".into()))
+                    .title("Transfer")
+                    .inner_size(POP_W, POP_H)
+                    .decorations(false)
+                    .transparent(true)
+                    .resizable(false)
+                    .skip_taskbar(true)
+                    .always_on_top(true)
+                    .shadow(true)
+                    .visible(false)
+                    .effects(EffectsBuilder::new().effects([Effect::Acrylic, Effect::HudWindow]).state(EffectState::Active).radius(18.0).build())
+                    .build();
+                match built {
+                    Ok(w) => w,
+                    Err(e) => return eprintln!("transfer: tray popover: {e}"),
+                }
+            }
+        };
+        let scale = w.scale_factor().unwrap_or(1.0);
+        let (pw, ph) = (POP_W * scale, POP_H * scale);
+        let mut x = click.x - pw / 2.0;
+        let mut y = click.y + 12.0 * scale;
+        if let Ok(Some(m)) = app.monitor_from_point(click.x, click.y) {
+            let (mx, my) = (m.position().x as f64, m.position().y as f64);
+            let (mw, mh) = (m.size().width as f64, m.size().height as f64);
+            if click.y > my + mh / 2.0 {
+                y = click.y - ph - 12.0 * scale;
+            }
+            x = x.clamp(mx + 8.0 * scale, (mx + mw - pw - 8.0 * scale).max(mx));
+            y = y.clamp(my + 8.0 * scale, (my + mh - ph - 8.0 * scale).max(my));
+        }
+        let _ = w.set_position(PhysicalPosition::new(x, y));
+        let _ = w.show();
+        let _ = w.set_focus();
+    });
+}
+
 fn show(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -231,7 +328,7 @@ fn show(app: &AppHandle) {
     }
 }
 
-fn toggle_pause(app: &AppHandle) {
+fn toggle_pause_inner(app: &AppHandle) {
     let st = app.state::<App>();
     let mut e = st.eng.lock().unwrap();
     e.settings.paused = !e.settings.paused;
@@ -283,7 +380,7 @@ fn main() {
         .manage(App { eng: eng.clone(), _watch: Mutex::new(None) })
         .invoke_handler(tauri::generate_handler![
             get_state, plan, apply, pick_folder, undo, correct, route, trash, save_settings,
-            open_path, reveal, move_to, search, duplicates, trash_files
+            open_path, reveal, move_to, search, duplicates, trash_files, toggle_pause, tray_action
         ])
         .setup(move |app| {
             // live watcher → UI event per move
@@ -318,21 +415,14 @@ fn main() {
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_tray_icon_event(|tray, ev| {
-                    // left click opens/hides the window; right click shows the menu
-                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = ev {
-                        let app = tray.app_handle();
-                        if let Some(w) = app.get_webview_window("main") {
-                            if w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false) {
-                                let _ = w.hide();
-                            } else {
-                                show(app);
-                            }
-                        }
+                    // left click opens the popover; right click shows the menu
+                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, position, .. } = ev {
+                        toggle_popover(tray.app_handle(), position);
                     }
                 })
                 .on_menu_event(|app, ev| match ev.id.as_ref() {
                     "open" => show(app),
-                    "pause" => toggle_pause(app),
+                    "pause" => toggle_pause_inner(app),
                     "sweep" => {
                         show(app);
                         let _ = app.emit("transfer://sweep", ());
@@ -361,9 +451,14 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                let _ = window.hide();
-                api.prevent_close();
+            match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    let _ = window.hide();
+                    api.prevent_close();
+                }
+                // the popover behaves like a menu: clicking anywhere else dismisses it
+                WindowEvent::Focused(false) if window.label() == "tray" => hide_popover(window.app_handle()),
+                _ => {}
             }
         })
         .run(tauri::generate_context!())

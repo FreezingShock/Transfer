@@ -274,24 +274,16 @@ body:not(.native){padding-bottom:64px}
 .hour{font-size:11px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--fg3);padding:8px 6px 2px}
 .more{align-self:center;color:var(--fg2);font-size:12px;font-weight:600;height:30px;padding:0 12px;border-radius:15px}
 .hint{display:block;font-size:11.5px;color:var(--fg3);margin-top:1px}
-.mi .mt{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
-.mi .mt small{font-size:11px;color:var(--fg3)}
-.mi{height:auto;min-height:40px;padding:6px 8px}
+.menu .mt{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
+.menu .mt small{font-size:11px;color:var(--fg3)}
+.menu .mi:has(.mt){height:auto;min-height:40px;padding:6px 8px}
 .mi[aria-checked=true]::after{content:"";margin-left:auto;width:8px;height:4px;border:2px solid var(--fg);border-top:0;border-right:0;transform:rotate(-45deg)}
-.pop{position:fixed;right:16px;top:16px;width:320px;z-index:12;display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:22px;
-  background:var(--tint);-webkit-backdrop-filter:blur(34px) saturate(180%);backdrop-filter:blur(34px) saturate(180%);border:1px solid var(--edge);box-shadow:inset 0 1px 0 var(--hi),var(--shadow)}
-[data-theme=dark] .pop{background:rgba(20,22,40,.9)}[data-theme=light] .pop{background:rgba(250,250,255,.92)}
-.pop .ph{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.pop .row{padding:5px 4px}.pop .ic{width:26px;height:26px;border-radius:8px}.pop .ic svg{width:14px;height:14px}
-.pop .pb{display:flex;gap:6px}.pop .pb .btn{height:34px;flex:1}
 </style>
 </head>
 <body>
 <div class="wall" id="wall"></div>
-<div class="demo-bar" aria-label="Prototype controls">
+<div class="demo-bar" aria-label="Demo controls">
   <button id="dWall">Wallpaper</button>
-  <button id="dMode">Mode control: Bar</button>
-  <button id="dTray">Tray popover</button>
   <button id="dFile">Simulate a download</button>
 </div>
 <main class="win" id="win">
