@@ -110,11 +110,12 @@ Experimental UI work goes on a branch (`ui-*`) so `main` never references comman
 
 ## Open items
 
-- **v0.5:** first-run walkthrough (pick folders → pick modes → dry run before anything moves) and a
-  glass tray popover (recent moves, Live toggle, Sweep, Open).
-- **Unconfirmed misfile:** on Nathan's PC, `.hdr`, `.bin`, `.blend` and `.woff2` files landed in Code.
-  The engine holds these for Review in tests; ask whether he routed them himself. If not, investigate
-  `classify.rs` and the learner's influence.
+- **v0.5 (in progress, prototype on branch `claude/project-thread-kcuw62`):** Nathan's picks (2026-11-02): all eight folder
+  tiles always shown; All view = today's number + folder cards + one activity feed grouped by hour; a "needs attention"
+  list (review, ask-first waiting, old installers); toasts arrive without overshoot; tray popover as a 320 px mini window
+  if it stays light; mode control is Bar / Chip / Sheet pending his choice (Bar looked nicest, he wants to compare).
+  Still to build: first-run walkthrough (pick folders → pick modes → dry run before anything moves) and the real tray popover.
+- **Misfile resolved (2026-11-02):** the `.hdr`, `.bin`, `.blend` and `.woff2` files in Code on Nathan's PC were moved there by him, not by the engine (it holds them for Review).
 - **Not yet tested on a real Mac:** folder permissions, native Trash (`NSFileManager`, Finder fallback), notifications, vibrancy.
   v0.4.2's Windows FFI (known folders, `SHFileOperationW`, Mica, cloud attrs) type-checks but hadn't run on Windows either.
 - **Roadmap** (2026-11-02 review): phases 1-2 shipped in v0.4.2. Next: v0.5 UI after Nathan answers the five taste

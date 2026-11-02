@@ -13,7 +13,7 @@
      smooth = critically damped (sheets, screens), gel = damping .72 (small droplets) */
   --snappy:linear(0,.073,.219,.382,.553,.68,.78,.855,.909,.95,.974,.988,.997,1.001,1.003,1.004,1.004,1.003,1.003,1.002,1.001,1.001,1.001,1,1);
   --smooth:linear(0,.077,.213,.372,.516,.636,.724,.798,.854,.893,.923,.946,.96,.972,.98,.986,.99,.993,.995,.997,.998,.998,.999,.999,1);
-  --gel:linear(0,.088,.268,.486,.665,.807,.909,.975,1.015,1.031,1.035,1.032,1.025,1.018,1.012,1.007,1.003,1.001,.999,.999,.999,.999,.999,.999,1);
+  --gel:var(--smooth); /* arrivals settle without overshoot */
   --out:cubic-bezier(.22,1,.36,1);
   --acc:#8e8cf5;
   /* dark (default) */
@@ -129,6 +129,7 @@ svg{width:16px;height:16px;flex:none}
 .view{flex:1;min-height:0;position:relative}
 .screen{position:absolute;inset:0;display:flex;flex-direction:column;gap:12px;overflow-y:auto;scrollbar-width:none}
 .screen::-webkit-scrollbar{display:none}
+.screen>*{flex-shrink:0}
 .screen.in-r{animation:inR .45s var(--smooth)}
 .screen.in-l{animation:inL .45s var(--smooth)}
 .screen.in-f{animation:inF .32s var(--out)}
@@ -215,7 +216,10 @@ input[type=range]{accent-color:var(--acc);width:120px}
 .foot{display:flex;align-items:center;gap:8px}
 .foot .seg{flex:1}
 #bSweep[hidden]{display:none}
-.foot .seg a svg{width:17px;height:17px}
+.foot .seg a svg{width:18px;height:18px}
+.foot .seg>a{flex-direction:column;gap:2px;height:46px;font-size:10.5px;font-weight:600;letter-spacing:.01em}
+.foot .seg>a[aria-current=page]{color:var(--fg)}
+.foot .seg .badge{top:3px;left:calc(50% + 6px)}
 .badge{position:absolute;top:2px;left:calc(50% + 5px);min-width:16px;height:16px;border-radius:8px;background:#ff453a;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px;animation:pop .45s var(--gel)}
 .note{display:flex;align-items:center;gap:8px;padding:2px 6px;font-size:12px;color:var(--fg2)}
 .note svg{width:14px;height:14px}
@@ -243,18 +247,44 @@ input[type=range]{accent-color:var(--acc);width:120px}
 .toast span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .toast button{height:26px;padding:0 11px;border-radius:13px;font-size:12px;font-weight:650;background:color-mix(in srgb,var(--solid-ink) 14%,transparent)}
 
-.demo-bar{position:fixed;bottom:max(10px,env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);display:flex;gap:6px;z-index:10}
-body:not(.native){padding-bottom:52px}
+.demo-bar{flex-wrap:wrap;justify-content:center;width:max-content;max-width:calc(100% - 20px);position:fixed;bottom:max(10px,env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);display:flex;gap:6px;z-index:10}
+body:not(.native){padding-bottom:64px}
 .native .demo-bar{display:none}
-.demo-bar button{height:28px;padding:0 10px;border-radius:14px;font-size:11.5px;font-weight:600;background:rgba(0,0,0,.45);color:#fff;border:1px solid rgba(255,255,255,.2)}
+.demo-bar button{white-space:nowrap;height:28px;padding:0 10px;border-radius:14px;font-size:11.5px;font-weight:600;background:rgba(0,0,0,.45);color:#fff;border:1px solid rgba(255,255,255,.2)}
 
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition-duration:.01ms!important}}
+
+/* v0.5 prototype */
+.chipmode{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px 0 9px;border-radius:13px;font-size:12px;font-weight:650}
+.chipmode i{width:7px;height:7px;border-radius:50%;background:#30d158}
+.chipmode.ask i{background:#ff9f0a}.chipmode.off i{background:var(--fg3)}
+.chipmode svg{width:12px;height:12px;stroke:var(--fg3)}
+.head .tools{display:flex;gap:6px;align-items:center}
+.tile.off-tile{opacity:.5}.tile.off-tile b{font-size:12px;font-weight:600;color:var(--fg3)}
+.attn .set small{display:block;font-size:11.5px;color:var(--fg2)}
+.attn .set .txt{gap:1px}
+.attn .dotn{min-width:22px;height:22px;border-radius:11px;background:color-mix(in srgb,var(--acc) 22%,transparent);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;padding:0 6px}
+.hour{font-size:11px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--fg3);padding:8px 6px 2px}
+.more{align-self:center;color:var(--fg2);font-size:12px;font-weight:600;height:30px;padding:0 12px;border-radius:15px}
+.hint{display:block;font-size:11.5px;color:var(--fg3);margin-top:1px}
+.mi .mt{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
+.mi .mt small{font-size:11px;color:var(--fg3)}
+.mi{height:auto;min-height:40px;padding:6px 8px}
+.mi[aria-checked=true]::after{content:"";margin-left:auto;width:8px;height:4px;border:2px solid var(--fg);border-top:0;border-right:0;transform:rotate(-45deg)}
+.pop{position:fixed;right:16px;top:16px;width:320px;z-index:12;display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:22px;
+  background:var(--tint);-webkit-backdrop-filter:blur(34px) saturate(180%);backdrop-filter:blur(34px) saturate(180%);border:1px solid var(--edge);box-shadow:inset 0 1px 0 var(--hi),var(--shadow)}
+[data-theme=dark] .pop{background:rgba(20,22,40,.9)}[data-theme=light] .pop{background:rgba(250,250,255,.92)}
+.pop .ph{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.pop .row{padding:5px 4px}.pop .ic{width:26px;height:26px;border-radius:8px}.pop .ic svg{width:14px;height:14px}
+.pop .pb{display:flex;gap:6px}.pop .pb .btn{height:34px;flex:1}
 </style>
 </head>
 <body>
 <div class="wall" id="wall"></div>
 <div class="demo-bar" aria-label="Prototype controls">
   <button id="dWall">Wallpaper</button>
+  <button id="dMode">Mode control: Bar</button>
+  <button id="dTray">Tray popover</button>
   <button id="dFile">Simulate a download</button>
 </div>
 <main class="win" id="win">
