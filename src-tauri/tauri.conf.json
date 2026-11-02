@@ -62,7 +62,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI5NUZBNTZCNTVBNjIwODUKUldTRklLWlZhNlZmS2FreWZoTjFGclhFTzZXTi9ZUDdWSHFzQVhuOVI3a0d1T1k5S09mcHZBaFMK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEEwMjcwRTIxRjNGOEM1QkQKUldTOXhmanpJUTRub0lzdCt0K0M0NDJ5aDZKNzd1QUpXdHF6WXFmVHRxdThoUVZtMW5SVDM0MEQK",
       "endpoints": [
         "https://github.com/FreezingShock/Transfer/releases/latest/download/latest.json"
       ],
