@@ -132,6 +132,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then npx tauri build --target universal-apple-darwin --config '{"bundle":{"createUpdaterArtifacts":true}}'; else npx tauri build --target universal-apple-darwin; fi
+          # stable code identity so macOS remembers folder permissions across updates
+          U=""; [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && U="sign-updater"
+          tools/mac-sign.sh src-tauri/target/universal-apple-darwin/release/bundle $U
       - uses: actions/upload-artifact@v4
         if: github.event_name != 'pull_request'
         with:

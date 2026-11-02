@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>Transfer sorts the files on your Desktop into folders, on your Mac only.</string>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>Transfer sorts the files in your Documents folder into folders, on your Mac only.</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>Transfer sorts your downloads into folders, on your Mac only.</string>
+  <key>NSRemovableVolumesUsageDescription</key>
+  <string>Transfer can sort a folder on a drive you choose, on your Mac only.</string>
+  <key>NSNetworkVolumesUsageDescription</key>
+  <string>Transfer can sort a folder on a network share you choose, on your Mac only.</string>
+</dict>
+</plist>

@@ -129,6 +129,14 @@ Experimental UI work goes on a branch (`ui-*`) so `main` never references comman
 - The folder bar hides on Settings. Sweep button only on Home (removed, not hidden, so the tab bar spans).
 - Before this design there was a "Nexus" transit-map style; Nathan moved away from it. Don't reintroduce it.
 
+## Mac folder permissions (v0.5.1)
+
+- macOS remembers Desktop/Documents/Downloads grants per code identity. Ad-hoc builds are identified by a hash that changes every build, so
+  every update (and sometimes every launch) re-prompted. `tools/mac-sign.sh` (run in CI after the universal build) re-signs with the designated
+  requirement `identifier "com.nathan.transfer"` and rebuilds the dmg + updater archive. Never change the bundle identifier.
+- `src-tauri/Info.plist` holds the `NS*FolderUsageDescription` strings. The watcher backs off 10 min on a PermissionDenied folder instead of retrying every 2 s.
+- Not verified on a real Mac. Proper fix is an Apple Developer ID + notarization.
+
 ## Open items
 
 - **v0.5.0 (shipped 2026-11-02):** Nathan's picks: all eight folder tiles always shown (off ones dimmed); All view = today's number +
